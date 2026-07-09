@@ -138,7 +138,6 @@ export default function AccountsPage() {
           <Form.Item name="wx_id" label="原始ID" rules={[{ required: true, message: '请输入原始ID' }]}>
             <Input placeholder="gh_xxxxx" />
           </Form.Item>
-          <Form.Item name="description" label="描述"><Input.TextArea /></Form.Item>
           <Form.Item name="status" label="状态" initialValue="active"><Select options={[{ value: 'active', label: '启用' }, { value: 'paused', label: '停用' }]} /></Form.Item>
         </Form>
       </Modal>
