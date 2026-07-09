@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSupabaseClient } from '@/lib/supabase'
+import { getSupabaseServiceClient } from '@/lib/supabase'
 
 export async function GET() {
   try {
-    const client = getSupabaseClient() as any
+    const client = getSupabaseServiceClient() as any
     
     const { data: accounts, error: accError } = await client
       .from('accounts')

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSupabaseClient } from '@/lib/supabase'
+import { getSupabaseServiceClient } from '@/lib/supabase'
 
 export async function GET() {
   try {
-    const client = getSupabaseClient() as any
+    const client = getSupabaseServiceClient() as any
     const { data, error } = await client
       .from('settings')
       .select('*')
@@ -23,7 +23,7 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
-    const client = getSupabaseClient() as any
+    const client = getSupabaseServiceClient() as any
 
     for (const [key, value] of Object.entries(body)) {
       const { error } = await client

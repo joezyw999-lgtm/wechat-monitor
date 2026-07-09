@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSupabaseClient } from '@/lib/supabase'
+import { getSupabaseServiceClient } from '@/lib/supabase'
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     const endDate = searchParams.get('endDate')
     const isRead = searchParams.get('isRead')
 
-    const client = getSupabaseClient()
+    const client = getSupabaseServiceClient()
     let query = client
       .from('articles')
       .select('*', { count: 'exact' })
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
-    const client = getSupabaseClient() as any
+    const client = getSupabaseServiceClient() as any
     const { data, error } = await client
       .from('articles')
       .update({ is_read: body.isRead, updated_at: new Date().toISOString() })

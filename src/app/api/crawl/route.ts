@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSupabaseClient } from '@/lib/supabase'
+import { getSupabaseServiceClient } from '@/lib/supabase'
 import { fetchAccountArticles, matchKeywords } from '@/lib/api-client'
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const accountId = body.accountId // optional, if not provided, crawl all
-    const client = getSupabaseClient() as any
+    const client = getSupabaseServiceClient() as any
 
     // Get API key from settings
     const { data: settingsData, error: settingsError } = await client

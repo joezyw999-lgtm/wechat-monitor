@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
-import { getSupabaseClient } from '@/lib/supabase'
+import { getSupabaseServiceClient } from '@/lib/supabase'
 import { fetchAccountArticles, matchKeywords } from '@/lib/api-client'
 
 // This route is called by Vercel Cron on a schedule
 export async function GET() {
   try {
-    const client = getSupabaseClient() as any
+    const client = getSupabaseServiceClient() as any
 
     // Get API key from settings
     const { data: settingsData } = await client

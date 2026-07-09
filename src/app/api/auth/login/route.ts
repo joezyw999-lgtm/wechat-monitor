@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSupabaseClient } from '@/lib/supabase'
+import { getSupabaseServiceClient } from '@/lib/supabase'
 
 export async function POST(request: NextRequest) {
   try {
     const { username, password } = await request.json()
-    const client = getSupabaseClient() as any
+    const client = getSupabaseServiceClient() as any
 
     const { data, error } = await client
       .from('users')
