@@ -10,11 +10,11 @@ export async function GET() {
     // Get API key from settings
     const { data: settingsData } = await client
       .from('settings')
-      .select('setting_value')
-      .eq('setting_key', 'api_key')
+      .select('value')
+      .eq('key', 'api_key')
       .maybeSingle()
 
-    const apiKey = settingsData?.setting_value
+    const apiKey = settingsData?.value
     if (!apiKey) {
       return NextResponse.json({ success: false, message: 'API Key not configured' }, { status: 400 })
     }

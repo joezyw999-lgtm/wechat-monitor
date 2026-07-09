@@ -11,12 +11,12 @@ export async function POST(request: NextRequest) {
     // Get API key from settings
     const { data: settingsData, error: settingsError } = await client
       .from('settings')
-      .select('setting_value')
-      .eq('setting_key', 'api_key')
+      .select('value')
+      .eq('key', 'api_key')
       .maybeSingle()
     if (settingsError) throw settingsError
 
-    const apiKey = settingsData?.setting_value
+    const apiKey = settingsData?.value
     if (!apiKey) {
       return NextResponse.json({ success: false, message: '请先在系统设置中配置 API Key' }, { status: 400 })
     }

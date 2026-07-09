@@ -11,7 +11,7 @@ export async function GET() {
 
     const settings: Record<string, string> = {}
     for (const item of data || []) {
-      settings[item.setting_key] = item.setting_value
+      settings[item.key] = item.value
     }
 
     return NextResponse.json({ success: true, data: settings })
@@ -29,8 +29,8 @@ export async function PUT(request: NextRequest) {
       const { error } = await client
         .from('settings')
         .upsert(
-          { setting_key: key, setting_value: value as string, updated_at: new Date().toISOString() },
-          { onConflict: 'setting_key' }
+          { key: key, value: value as string, updated_at: new Date().toISOString() },
+          { onConflict: 'key' }
         )
       if (error) throw error
     }
