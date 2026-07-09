@@ -1,0 +1,135 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getSupabaseClient } from '@/lib/supabase'
+import { fetchAccountArticles, matchKeywords } from '@/lib/api-client'
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const accountId = body.accountId // optional, if not provided, crawl all
+    const client = getSupabaseClient() as any
+
+    // Get API key from settings
+    const { data: settingsData, error: settingsError } = await client
+      .from('settings')
+      .select('setting_value')
+      .eq('setting_key', 'api_key')
+      .maybeSingle()
+    if (settingsError) throw settingsError
+
+    const apiKey = settingsData?.setting_value
+    if (!apiKey) {
+      return NextResponse.json({ success: false, message: '请先在系统设置中配置 API Key' }, { status: 400 })
+    }
+
+    // Get accounts to crawl
+    let accountsQuery = client.from('accounts').select('*').eq('status', 'active')
+    if (accountId) {
+      accountsQuery = client.from('accounts').select('*').eq('id', accountId)
+    }
+    const { data: accounts, error: accError } = await accountsQuery
+    if (accError) throw accError
+
+    if (!accounts || accounts.length === 0) {
+      return NextResponse.json({ success: false, message: '没有可采集的公众号' }, { status: 400 })
+    }
+
+    // Get active keywords
+    const { data: keywordsData, error: kwError } = await client
+      .from('keywords')
+      .select('keyword')
+      .eq('status', 'active')
+    if (kwError) throw kwError
+    const keywords = keywordsData?.map((k: any) => k.keyword) || []
+
+    // Create crawl log
+    const { data: logData, error: logError } = await client
+      .from('crawl_logs')
+      .insert({
+        trigger_type: 'manual',
+        status: 'running',
+        started_at: new Date().toISOString()
+      })
+      .select()
+      .single()
+    if (logError) throw logError
+
+    let totalNew = 0
+    let totalMatched = 0
+    let totalFailed = 0
+    const errors: string[] = []
+
+    // Crawl each account
+    for (const account of accounts) {
+      const result = await fetchAccountArticles(apiKey, account.biz_id)
+      
+      if (!result.success) {
+        totalFailed++
+        errors.push(`${account.name}: ${result.error}`)
+        continue
+      }
+
+      for (const article of result.articles) {
+        // Check for duplicates by URL
+        const { data: existing } = await client
+          .from('articles')
+          .select('id')
+          .eq('url', article.url)
+          .maybeSingle()
+
+        if (existing) continue
+
+        // Match keywords
+        const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
+
+        // Insert article
+        const { error: insertError } = await client
+          .from('articles')
+          .insert({
+            account_id: account.id,
+            title: article.title,
+            url: article.url,
+            summary: article.digest || null,
+            cover_image: article.cover || null,
+            author: article.author || account.name,
+            content: article.content || null,
+            published_at: new Date(article.publish_time * 1000).toISOString(),
+            unique_key: article.msg_id || null,
+            matched_keywords: matchedKw.length > 0 ? matchedKw : null
+          })
+        if (insertError) {
+          errors.push(`Insert error: ${insertError.message}`)
+          continue
+        }
+
+        totalNew++
+        if (matchedKw.length > 0) totalMatched++
+      }
+    }
+
+    // Update crawl log
+    await client
+      .from('crawl_logs')
+      .update({
+        status: totalFailed > 0 ? 'partial' : 'success',
+        finished_at: new Date().toISOString(),
+        accounts_crawled: accounts.length,
+        articles_new: totalNew,
+        articles_matched: totalMatched,
+        error_message: errors.length > 0 ? errors.join('; ') : null
+      })
+      .eq('id', logData.id)
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        accountsCrawled: accounts.length,
+        newArticles: totalNew,
+        matchedArticles: totalMatched,
+        failedAccounts: totalFailed,
+        errors
+      }
+    })
+  } catch (error: any) {
+    return NextResponse.json({ success: false, message: error.message }, { status: 500 })
+  }
+}
