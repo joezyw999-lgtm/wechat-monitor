@@ -1,7 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { getDatabase } from './database';
-import { triggerManualCrawl } from './api';
-import { restartScheduler } from './scheduler';
+import { restartScheduler, triggerManualCrawl } from './scheduler';
 
 export function registerIpcHandlers(): void {
   // ========== Auth ==========
