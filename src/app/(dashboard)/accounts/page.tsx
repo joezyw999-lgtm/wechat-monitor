@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Tag } from 'antd'
-import { PlusOutlined, SyncOutlined, ReloadOutlined } from '@ant-design/icons'
+import { PlusOutlined, SyncOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useCache } from '@/lib/cache'
 
@@ -13,6 +13,7 @@ export default function AccountsPage() {
   const [crawlLoading, setCrawlLoading] = useState<string | null>(null)
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [lookupLoading, setLookupLoading] = useState(false)
   const cache = useCache()
 
   const fetchData = useCallback(async () => {
@@ -34,6 +35,39 @@ export default function AccountsPage() {
   }, [cache])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  const handleLookup = useCallback(async () => {
+    const name = form.getFieldValue('name')
+    if (!name) {
+      message.warning('请先输入公众号名称')
+      return
+    }
+    setLookupLoading(true)
+    try {
+      const res = await fetch(`/api/accounts/lookup?name=${encodeURIComponent(name)}`)
+      const result = await res.json()
+      if (result.success && result.data) {
+        const { biz_id, original_id, wechat_id, description } = result.data
+        // 优先使用原始ID，其次使用biz_id
+        const idToUse = original_id || biz_id || wechat_id
+        if (idToUse) {
+          form.setFieldsValue({ 
+            biz_id: idToUse,
+            description: description || form.getFieldValue('description')
+          })
+          message.success(`找到公众号: ${result.data.name || name}，ID: ${idToUse}`)
+        } else {
+          message.warning('未找到公众号ID，请手动输入')
+        }
+      } else {
+        message.warning(result.message || '未找到该公众号，请手动输入原始ID')
+      }
+    } catch (error) {
+      message.error('查询失败，请稍后重试')
+    } finally {
+      setLookupLoading(false)
+    }
+  }, [form])
 
   const handleSave = useCallback(async () => {
     try {
@@ -132,8 +166,30 @@ export default function AccountsPage() {
         destroyOnClose
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}><Input /></Form.Item>
-          <Form.Item name="biz_id" label="原始ID (gh_xxx)" rules={[{ required: true, message: '请输入原始ID' }]}><Input placeholder="gh_xxxxx" /></Form.Item>
+          <Form.Item name="name" label="公众号名称" rules={[{ required: true, message: '请输入名称' }]}>
+            <Input placeholder="如：观察者网" />
+          </Form.Item>
+          <Form.Item 
+            name="biz_id" 
+            label={
+              <span>
+                原始ID 
+                <Button 
+                  type="link" 
+                  size="small" 
+                  icon={<SearchOutlined />} 
+                  loading={lookupLoading}
+                  onClick={handleLookup}
+                  style={{ padding: 0, marginLeft: 8 }}
+                >
+                  自动查询
+                </Button>
+              </span>
+            }
+            rules={[{ required: true, message: '请输入原始ID或点击自动查询' }]}
+          >
+            <Input placeholder="gh_xxxxx 或点击「自动查询」获取" />
+          </Form.Item>
           <Form.Item name="description" label="描述"><Input.TextArea /></Form.Item>
           <Form.Item name="status" label="状态" initialValue="active"><Select options={[{ value: 'active', label: '启用' }, { value: 'paused', label: '停用' }]} /></Form.Item>
         </Form>
