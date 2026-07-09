@@ -1,28 +1,31 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Form, Input, Button, Card, message } from 'antd'
+import { useState, useEffect, useCallback } from 'react'
+import { Form, Input, Button, Card, message, Spin } from 'antd'
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(false)
+  const [fetching, setFetching] = useState(true)
   const [form] = Form.useForm()
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
+    setFetching(true)
     try {
       const res = await fetch('/api/settings')
       const result = await res.json()
       if (result.success) {
         form.setFieldsValue({
           api_key: result.data.api_key || '',
-          cron_expression: result.data.cron_expression || '0 */2 * * *'
+          cron_expression: result.data.cron_expression || '0 8 * * *'
         })
       }
     } catch (error) { console.error(error) }
-  }
+    finally { setFetching(false) }
+  }, [form])
 
-  useEffect(() => { fetchSettings() }, [])
+  useEffect(() => { fetchSettings() }, [fetchSettings])
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     setLoading(true)
     try {
       const values = await form.validateFields()
@@ -39,6 +42,10 @@ export default function SettingsPage() {
       }
     } catch (error) { console.error(error) }
     finally { setLoading(false) }
+  }, [form])
+
+  if (fetching) {
+    return <div style={{ textAlign: 'center', padding: 100 }}><Spin size="large" /></div>
   }
 
   return (
@@ -48,18 +55,17 @@ export default function SettingsPage() {
           <Input.Password placeholder="输入你的 getoneapi.com API Key" />
         </Form.Item>
         <Form.Item name="cron_expression" label="Cron 表达式" rules={[{ required: true }]}>
-          <Input placeholder="0 */2 * * *" />
+          <Input placeholder="0 8 * * *" />
         </Form.Item>
         <Form.Item>
           <Button type="primary" loading={loading} onClick={handleSave}>保存设置</Button>
         </Form.Item>
       </Form>
       <div style={{ color: '#666', fontSize: 12, marginTop: 16 }}>
-        <p>Cron 表达式说明：</p>
-        <ul>
-          <li><code>0 */2 * * *</code> - 每 2 小时执行一次</li>
-          <li><code>0 0 */6 * * *</code> - 每 6 小时执行一次</li>
-          <li><code>0 0 8,20 * * *</code> - 每天 8:00 和 20:00 执行</li>
+        <p>Cron 表达式说明（Vercel 免费版仅支持每天一次）：</p>
+        <ul style={{ paddingLeft: 20 }}>
+          <li><code>0 8 * * *</code> - 每天 UTC 8:00（北京时间 16:00）</li>
+          <li><code>0 0 * * *</code> - 每天 UTC 0:00（北京时间 8:00）</li>
         </ul>
       </div>
     </Card>
