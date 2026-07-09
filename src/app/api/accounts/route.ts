@@ -23,8 +23,7 @@ export async function POST(request: NextRequest) {
       .from('accounts')
       .insert({
         name: body.name,
-        biz_id: body.bizId,
-        description: body.description || null,
+        wx_id: body.bizId || body.wxId,
         status: body.status || 'active'
       })
       .select()
@@ -44,8 +43,7 @@ export async function PUT(request: NextRequest) {
       .from('accounts')
       .update({
         name: body.name,
-        biz_id: body.bizId,
-        description: body.description || null,
+        wx_id: body.bizId || body.wxId,
         status: body.status,
         updated_at: new Date().toISOString()
       })

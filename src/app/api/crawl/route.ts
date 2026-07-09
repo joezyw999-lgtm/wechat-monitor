@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
 
     // Crawl each account
     for (const account of accounts) {
-      const result = await fetchAccountArticles(apiKey, account.biz_id)
+      const result = await fetchAccountArticles(apiKey, account.wx_id)
       
       if (!result.success) {
         totalFailed++

@@ -53,7 +53,7 @@ export async function GET() {
     const errors: string[] = []
 
     for (const account of accounts) {
-      const result = await fetchAccountArticles(apiKey, account.biz_id)
+      const result = await fetchAccountArticles(apiKey, account.wx_id)
       
       if (!result.success) {
         totalFailed++
