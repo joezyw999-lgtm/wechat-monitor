@@ -95,7 +95,6 @@ export default function AccountsPage() {
   const columns = [
     { title: '名称', dataIndex: 'name', key: 'name', width: 150 },
     { title: '原始ID', dataIndex: 'wx_id', key: 'wx_id', width: 180 },
-    { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true },
     { title: '状态', dataIndex: 'status', key: 'status', width: 80, render: (v: string) => <Tag color={v === 'active' ? 'green' : 'default'}>{v === 'active' ? '启用' : '停用'}</Tag> },
     { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 160, render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm') },
     {

@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
       .from('accounts')
       .insert({
         name: body.name,
-        wx_id: body.bizId || body.wxId,
+        wx_id: body.wx_id || body.bizId || body.wxId,
         status: body.status || 'active'
       })
       .select()
