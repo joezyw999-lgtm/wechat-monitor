@@ -2,7 +2,7 @@
 requires = [ "nodejs-24" ]
 template = "nextjs"
 version = "0.0.28"
-appliedPatches = [ ]
+appliedPatches = [ "nextjs/next-output-tracing-root@0.0.13" ]
 
 [dev]
 build = [ "bash", "./scripts/prepare.sh" ]

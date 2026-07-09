@@ -1,8 +1,11 @@
 import type { NextConfig } from 'next';
+import path from 'path';
 
 const nextConfig: NextConfig = {
-  // outputFileTracingRoot: path.resolve(__dirname, '../../'),  // Uncomment and add 'import path from "path"' if needed
-  /* config options here */
+  // outputFileTracingRoot: path.resolve(__dirname, '.'),
+  turbopack: {
+    root: __dirname,
+  },
   allowedDevOrigins: ['*.dev.coze.site'],
   images: {
     remotePatterns: [
