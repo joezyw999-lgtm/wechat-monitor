@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
     const accountId = body.accountId // optional, if not provided, crawl all
     const client = getSupabaseServiceClient() as any
 
-    // Get API key from settings
+    // Get API key from settings (bypass cache for fresh data)
     const { data: settingsData, error: settingsError } = await client
       .from('settings')
       .select('value')
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
 
     const apiKey = settingsData?.value
     if (!apiKey) {
-      return NextResponse.json({ success: false, message: '请先在系统设置中配置 API Key' }, { status: 400 })
+      return NextResponse.json({ success: false, message: '请先在系统设置中配置 OneAPI Key' }, { status: 400 })
     }
 
     // Get accounts to crawl
