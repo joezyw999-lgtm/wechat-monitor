@@ -32,8 +32,8 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 使用 getoneapi.com 的微信搜索接口
-    const searchResponse = await fetch('https://api.getoneapi.com/api/wechat-search/search', {
+    // 使用 getoneapi.com 的微信综合搜索接口（搜一搜）
+    const searchResponse = await fetch('https://api.getoneapi.com/api/wechat-search/v2/account_search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
