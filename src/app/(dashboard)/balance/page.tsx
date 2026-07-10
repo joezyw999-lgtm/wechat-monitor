@@ -1,22 +1,43 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Card, Statistic, Table, Tag, DatePicker, Space, Button, message, Spin, Alert, Row, Col } from 'antd'
-import { WalletOutlined, ReloadOutlined, DollarOutlined, HistoryOutlined } from '@ant-design/icons'
+import { WalletOutlined, ReloadOutlined, DollarOutlined, HistoryOutlined, ApiOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 
 const { RangePicker } = DatePicker
 
+// API pricing map (yuan per call)
+const API_PRICING: Record<string, number> = {
+  '/api/wechat-mp-v2/fetch_mp_services': 0.15,
+  '/api/wechat-mp-v2/fetch_mp_related_articles': 0.15,
+  '/api/wechat-mp-v2/fetch_mp_article_stats': 0.15,
+  '/api/wechat-mp-v2/fetch_mp_article_list': 0.15,
+  '/api/wechat-mp-v2/fetch_mp_article_ad': 0.15,
+  '/api/wechat-mp-v2/fetch_mp_article_comment_list': 0.15,
+  '/api/wechat-mp-v2/fetch_mp_article_comment_reply_list': 0.15,
+  '/api/wechat-mp-v2/fetch_mp_article_detail': 0.15,
+  '/api/wechat-mp-v2/fetch_mp_profile': 0.15,
+}
+
+// Default pricing for unknown APIs
+const DEFAULT_PRICING = 0.15
+
 interface UsageRecord {
-  id?: string
-  date?: string
-  created_at?: string
-  api_name?: string
-  api_type?: string
-  cost?: number
-  balance?: number
-  status?: string
-  [key: string]: any
+  date: string
+  records: Array<{
+    code: string
+    successCount: number
+  }>
+}
+
+interface FlattenedRecord {
+  key: string
+  date: string
+  apiName: string
+  callCount: number
+  unitPrice: number
+  totalCost: number
 }
 
 export default function BalancePage() {
@@ -29,18 +50,18 @@ export default function BalancePage() {
   ])
   const [usageLoading, setUsageLoading] = useState(false)
 
+  const fetcherRef = useRef({ fetchBalance: null as any, fetchUsageRecords: null as any })
+
   const fetchBalance = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch('/api/balance?type=balance')
       const result = await res.json()
       if (result.success) {
-        // The balance data structure may vary, try to extract the balance value
         const balanceData = result.data
         if (typeof balanceData === 'number') {
           setBalance(balanceData)
         } else if (typeof balanceData === 'object' && balanceData !== null) {
-          // Try common field names
           const balanceValue = balanceData.balance ?? balanceData.amount ?? balanceData.remaining ?? balanceData.credit ?? null
           setBalance(typeof balanceValue === 'number' ? balanceValue : parseFloat(balanceValue) || 0)
         } else {
@@ -77,83 +98,84 @@ export default function BalancePage() {
     }
   }, [dateRange])
 
+  // Store latest fetchers in ref
+  fetcherRef.current = { fetchBalance, fetchUsageRecords }
+
   useEffect(() => {
-    fetchBalance()
-    fetchUsageRecords()
-  }, [fetchBalance, fetchUsageRecords])
+    fetcherRef.current.fetchBalance()
+    fetcherRef.current.fetchUsageRecords()
+  }, [fetchUsageRecords])
 
   const handleRefresh = () => {
     fetchBalance()
     fetchUsageRecords()
   }
 
-  // Calculate total cost from usage records
-  const totalCost = usageRecords.reduce((sum, record) => {
-    const cost = record.cost ?? record.amount ?? record.fee ?? 0
-    return sum + (typeof cost === 'number' ? cost : parseFloat(cost) || 0)
-  }, 0)
+  // Flatten usage records for table display
+  const flattenedRecords: FlattenedRecord[] = usageRecords.flatMap((dayRecord, dayIndex) =>
+    dayRecord.records.map((record, recordIndex) => {
+      const unitPrice = API_PRICING[record.code] ?? DEFAULT_PRICING
+      return {
+        key: `${dayRecord.date}-${record.code}-${recordIndex}`,
+        date: dayRecord.date,
+        apiName: record.code,
+        callCount: record.successCount,
+        unitPrice,
+        totalCost: record.successCount * unitPrice,
+      }
+    })
+  )
 
-  // Table columns for usage records
+  // Calculate totals
+  const totalCalls = flattenedRecords.reduce((sum, r) => sum + r.callCount, 0)
+  const totalCost = flattenedRecords.reduce((sum, r) => sum + r.totalCost, 0)
+
+  // Table columns
   const columns = [
     {
       title: '日期',
       dataIndex: 'date',
       key: 'date',
-      render: (v: string, record: UsageRecord) => {
-        const date = v || record.created_at
-        return date ? dayjs(date).format('YYYY-MM-DD HH:mm') : '-'
-      }
+      render: (v: string) => dayjs(v).format('YYYY-MM-DD'),
+      sorter: (a: FlattenedRecord, b: FlattenedRecord) => a.date.localeCompare(b.date),
+      defaultSortOrder: 'descend' as const,
     },
     {
-      title: 'API 名称',
-      key: 'api_name',
-      render: (_: any, record: UsageRecord) => {
-        return record.api_name || record.api_type || record.name || record.endpoint || '-'
-      }
+      title: 'API 接口',
+      dataIndex: 'apiName',
+      key: 'apiName',
+      render: (v: string) => {
+        const shortName = v.replace('/api/wechat-mp-v2/', '')
+        return <Tag icon={<ApiOutlined />} color="blue">{shortName}</Tag>
+      },
+    },
+    {
+      title: '调用次数',
+      dataIndex: 'callCount',
+      key: 'callCount',
+      render: (v: number) => <span style={{ fontWeight: 500 }}>{v} 次</span>,
+      sorter: (a: FlattenedRecord, b: FlattenedRecord) => a.callCount - b.callCount,
+    },
+    {
+      title: '单价 (元)',
+      dataIndex: 'unitPrice',
+      key: 'unitPrice',
+      render: (v: number) => <span style={{ color: '#666' }}>¥{v.toFixed(4)}</span>,
     },
     {
       title: '费用 (元)',
-      dataIndex: 'cost',
-      key: 'cost',
-      render: (v: number, record: UsageRecord) => {
-        const cost = v ?? record.amount ?? record.fee ?? 0
-        const costNum = typeof cost === 'number' ? cost : parseFloat(cost) || 0
-        return <span style={{ color: '#f5222d' }}>-{costNum.toFixed(4)}</span>
-      }
+      dataIndex: 'totalCost',
+      key: 'totalCost',
+      render: (v: number) => <span style={{ color: '#f5222d', fontWeight: 500 }}>-¥{v.toFixed(4)}</span>,
+      sorter: (a: FlattenedRecord, b: FlattenedRecord) => a.totalCost - b.totalCost,
     },
-    {
-      title: '剩余余额 (元)',
-      dataIndex: 'balance',
-      key: 'balance',
-      render: (v: number, record: UsageRecord) => {
-        const bal = v ?? record.remaining ?? record.credit_after
-        if (bal === undefined || bal === null) return '-'
-        const balNum = typeof bal === 'number' ? bal : parseFloat(bal) || 0
-        return <span style={{ color: '#52c41a' }}>{balNum.toFixed(4)}</span>
-      }
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      render: (v: string) => {
-        if (!v) return <Tag color="green">成功</Tag>
-        const statusMap: Record<string, { color: string; text: string }> = {
-          success: { color: 'green', text: '成功' },
-          failed: { color: 'red', text: '失败' },
-          pending: { color: 'orange', text: '处理中' },
-        }
-        const status = statusMap[v.toLowerCase()] || { color: 'default', text: v }
-        return <Tag color={status.color}>{status.text}</Tag>
-      }
-    }
   ]
 
   return (
     <div>
       <Row gutter={[16, 16]}>
         {/* Balance Card */}
-        <Col xs={24} sm={12} lg={8}>
+        <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="账户余额"
@@ -176,7 +198,7 @@ export default function BalancePage() {
         </Col>
 
         {/* Total Cost Card */}
-        <Col xs={24} sm={12} lg={8}>
+        <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="本期总消费"
@@ -192,17 +214,32 @@ export default function BalancePage() {
           </Card>
         </Col>
 
-        {/* Record Count Card */}
-        <Col xs={24} sm={12} lg={8}>
+        {/* Call Count Card */}
+        <Col xs={24} sm={12} lg={6}>
           <Card>
             <Statistic
               title="本期调用次数"
-              value={usageRecords.length}
+              value={totalCalls}
               prefix={<HistoryOutlined />}
               suffix="次"
             />
             <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
-              平均每次 {(usageRecords.length > 0 ? totalCost / usageRecords.length : 0).toFixed(4)} 元
+              平均每次 {totalCalls > 0 ? (totalCost / totalCalls).toFixed(4) : '0.0000'} 元
+            </div>
+          </Card>
+        </Col>
+
+        {/* API Types Card */}
+        <Col xs={24} sm={12} lg={6}>
+          <Card>
+            <Statistic
+              title="使用接口类型"
+              value={new Set(flattenedRecords.map(r => r.apiName)).size}
+              prefix={<ApiOutlined />}
+              suffix="种"
+            />
+            <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
+              单价均为 ¥0.15/次
             </div>
           </Card>
         </Col>
@@ -210,7 +247,7 @@ export default function BalancePage() {
 
       {/* Usage Records */}
       <Card
-        title="使用记录"
+        title="使用记录明细"
         style={{ marginTop: 16 }}
         extra={
           <Space>
@@ -232,8 +269,7 @@ export default function BalancePage() {
       >
         <Table
           columns={columns}
-          dataSource={usageRecords}
-          rowKey={(record, index) => record.id || record.date || String(index)}
+          dataSource={flattenedRecords}
           loading={usageLoading}
           pagination={{
             pageSize: 20,
@@ -241,6 +277,22 @@ export default function BalancePage() {
             showTotal: (total) => `共 ${total} 条记录`
           }}
           locale={{ emptyText: '暂无使用记录' }}
+          summary={() => (
+            <Table.Summary fixed>
+              <Table.Summary.Row>
+                <Table.Summary.Cell index={0} colSpan={2}>
+                  <strong>合计</strong>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={1}>
+                  <strong>{totalCalls} 次</strong>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={2}>-</Table.Summary.Cell>
+                <Table.Summary.Cell index={3}>
+                  <strong style={{ color: '#f5222d' }}>-¥{totalCost.toFixed(4)}</strong>
+                </Table.Summary.Cell>
+              </Table.Summary.Row>
+            </Table.Summary>
+          )}
         />
       </Card>
 
@@ -249,11 +301,11 @@ export default function BalancePage() {
         message="计费说明"
         description={
           <ul style={{ margin: 0, paddingLeft: 20 }}>
-            <li>每次 API 调用会根据接口类型扣除相应费用</li>
-            <li>只有成功的请求（code=200）才会计费</li>
-            <li>失败的请求不会扣费，可以安全重试</li>
+            <li>公众号相关接口（wechat-mp-v2）单价：<strong>¥0.15/次</strong></li>
+            <li>仅成功的请求（code=200）才会计费，失败不扣费</li>
             <li>余额数据实时同步自 getoneapi.com</li>
             <li>使用记录最多可查询 31 天范围内的数据</li>
+            <li>当前余额：¥{balance?.toFixed(4) ?? '0.0000'}，预计可支撑约 {balance && totalCost > 0 ? Math.floor(balance / (totalCost / dayjs(dateRange[1]).diff(dayjs(dateRange[0]), 'day') || 1)).toFixed(0) : '-'} 天</li>
           </ul>
         }
         type="info"
