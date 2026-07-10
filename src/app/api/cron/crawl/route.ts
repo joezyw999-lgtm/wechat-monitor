@@ -125,7 +125,7 @@ export async function GET() {
         content: a.article.content || null,
         published_at: a.article.published_at || new Date().toISOString(),
         unique_key: a.article.msg_id || null,
-        matched_keywords: a.matchedKw
+        matched_keywords: a.matchedKw.join(',')
       }))
 
       // Insert in batches of 50

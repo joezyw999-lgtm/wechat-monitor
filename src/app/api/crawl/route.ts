@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
         content: a.article.content || null,
         published_at: new Date(a.article.publish_time * 1000).toISOString(),
         unique_key: a.article.msg_id || null,
-        matched_keywords: a.matchedKw
+        matched_keywords: a.matchedKw.join(',')
       }))
 
       // Insert in batches of 50

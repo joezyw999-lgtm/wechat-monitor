@@ -43,7 +43,7 @@ export async function PUT(request: NextRequest) {
       .from('accounts')
       .update({
         name: body.name,
-        wx_id: body.bizId || body.wxId,
+        wx_id: body.wx_id || body.bizId || body.wxId,
         status: body.status,
         updated_at: new Date().toISOString()
       })
