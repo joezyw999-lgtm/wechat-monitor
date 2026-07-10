@@ -10,6 +10,7 @@ interface ArticleData {
   author: string
   content: string
   publish_time: number
+  published_at?: string
   msg_id?: string
 }
 
@@ -21,12 +22,13 @@ interface CrawlResult {
 
 export async function fetchAccountArticles(
   apiKey: string,
-  bizId: string
+  bizId: string,
+  count: number = 20
 ): Promise<CrawlResult> {
   try {
     const response = await axios.post(
       `${API_BASE}/api/wechat-mp-v2/articles`,
-      { username: bizId, need_content: false },
+      { username: bizId, count, need_content: false },
       {
         headers: {
           'Content-Type': 'application/json',

@@ -10,14 +10,20 @@ export async function GET() {
     // Get API key from settings
     const { data: settingsData } = await client
       .from('settings')
-      .select('value')
-      .eq('key', 'api_key')
-      .maybeSingle()
+      .select('key, value')
+      .in('key', ['api_key', 'oneapi_key', 'article_count'])
 
-    const apiKey = settingsData?.value
+    const settingsMap: Record<string, string> = {}
+    settingsData?.forEach((s: any) => {
+      settingsMap[s.key] = s.value
+    })
+
+    const apiKey = settingsMap['oneapi_key'] || settingsMap['api_key']
     if (!apiKey) {
       return NextResponse.json({ success: false, message: 'API Key not configured' }, { status: 400 })
     }
+
+    const articleCount = parseInt(settingsMap['article_count'] || '20', 10)
 
     // Get active accounts
     const { data: accounts } = await client
@@ -39,11 +45,7 @@ export async function GET() {
     // Create crawl log
     const { data: logData } = await client
       .from('crawl_logs')
-      .insert({
-        trigger_type: 'cron',
-        status: 'running',
-        started_at: new Date().toISOString()
-      })
+      .insert({ status: 'running', message: 'Cron job started' })
       .select()
       .single()
 
@@ -53,8 +55,8 @@ export async function GET() {
     const errors: string[] = []
 
     for (const account of accounts) {
-      const result = await fetchAccountArticles(apiKey, account.wx_id)
-      
+      const result = await fetchAccountArticles(apiKey, account.wx_id, articleCount)
+
       if (!result.success) {
         totalFailed++
         errors.push(`${account.name}: ${result.error}`)
@@ -72,48 +74,33 @@ export async function GET() {
 
         const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
 
-        const { error: insertError } = await client
-          .from('articles')
-          .insert({
-            account_id: account.id,
-            title: article.title,
-            url: article.url,
-            summary: article.digest || null,
-            cover_image: article.cover || null,
-            author: article.author || account.name,
-            content: article.content || null,
-            published_at: new Date(article.publish_time * 1000).toISOString(),
-            unique_key: article.msg_id || null,
-            matched_keywords: matchedKw.length > 0 ? matchedKw : null
-          })
-        if (insertError) {
-          errors.push(`Insert error: ${insertError.message}`)
-          continue
-        }
+        await client.from('articles').insert({
+          account_id: account.id,
+          title: article.title,
+          summary: article.digest || '',
+          url: article.url,
+          published_at: article.published_at || new Date().toISOString(),
+          matched_keywords: matchedKw.length > 0 ? matchedKw.join(',') : null,
+        })
 
         totalNew++
         if (matchedKw.length > 0) totalMatched++
       }
     }
 
-    // Update crawl log
     await client
       .from('crawl_logs')
       .update({
-        status: totalFailed > 0 ? 'partial' : 'success',
-        finished_at: new Date().toISOString(),
-        accounts_crawled: accounts.length,
-        articles_new: totalNew,
+        status: 'completed',
+        message: errors.length > 0 ? errors.join('; ') : 'Success',
+        articles_found: totalNew,
         articles_matched: totalMatched,
-        error_message: errors.length > 0 ? errors.join('; ') : null
+        finished_at: new Date().toISOString(),
       })
       .eq('id', logData.id)
 
-    return NextResponse.json({
-      success: true,
-      data: { accountsCrawled: accounts.length, newArticles: totalNew, matchedArticles: totalMatched }
-    })
+    return NextResponse.json({ success: true, totalNew, totalMatched, totalFailed })
   } catch (error: any) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 })
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Form, Input, Button, Card, message, Spin } from 'antd'
+import { Form, Input, InputNumber, Button, Card, message, Spin } from 'antd'
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(false)
@@ -16,7 +16,8 @@ export default function SettingsPage() {
       if (result.success) {
         form.setFieldsValue({
           api_key: result.data.api_key || '',
-          cron_expression: result.data.cron_expression || '0 8 * * *'
+          cron_expression: result.data.cron_expression || '0 8 * * *',
+          article_count: result.data.article_count || 20
         })
       }
     } catch (error) { console.error(error) }
@@ -54,6 +55,9 @@ export default function SettingsPage() {
         <Form.Item name="api_key" label="OneAPI Key" rules={[{ required: true, message: '请输入 API Key' }]}>
           <Input.Password placeholder="输入你的 getoneapi.com API Key" />
         </Form.Item>
+        <Form.Item name="article_count" label="每次采集文章数量" rules={[{ required: true, message: '请输入采集数量' }]}>
+          <InputNumber min={1} max={100} style={{ width: '100%' }} placeholder="默认 20" />
+        </Form.Item>
         <Form.Item name="cron_expression" label="Cron 表达式" rules={[{ required: true }]}>
           <Input placeholder="0 8 * * *" />
         </Form.Item>
@@ -62,7 +66,13 @@ export default function SettingsPage() {
         </Form.Item>
       </Form>
       <div style={{ color: '#666', fontSize: 12, marginTop: 16 }}>
-        <p>Cron 表达式说明（Vercel 免费版仅支持每天一次）：</p>
+        <p><strong>采集数量说明：</strong></p>
+        <ul style={{ paddingLeft: 20 }}>
+          <li>每次采集时，每个公众号获取最新的 N 篇文章</li>
+          <li>数量越多，消耗的 API 额度越多</li>
+          <li>建议设置 20-50 篇</li>
+        </ul>
+        <p style={{ marginTop: 8 }}><strong>Cron 表达式说明（Vercel 免费版仅支持每天一次）：</strong></p>
         <ul style={{ paddingLeft: 20 }}>
           <li><code>0 8 * * *</code> - 每天 UTC 8:00（北京时间 16:00）</li>
           <li><code>0 0 * * *</code> - 每天 UTC 0:00（北京时间 8:00）</li>

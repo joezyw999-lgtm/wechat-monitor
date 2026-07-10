@@ -8,15 +8,17 @@ export async function POST(request: NextRequest) {
     const accountId = body.accountId // optional, if not provided, crawl all
     const client = getSupabaseServiceClient() as any
 
-    // Get API key from settings (bypass cache for fresh data)
+    // Get API key and article count from settings (bypass cache for fresh data)
     const { data: settingsData, error: settingsError } = await client
       .from('settings')
-      .select('value')
-      .eq('key', 'api_key')
-      .maybeSingle()
+      .select('key, value')
+      .in('key', ['api_key', 'oneapi_key', 'article_count'])
     if (settingsError) throw settingsError
 
-    const apiKey = settingsData?.value
+    const settingsMap = new Map<string, string>(settingsData?.map((s: any) => [s.key, s.value]) || [])
+    const apiKey = settingsMap.get('oneapi_key') || settingsMap.get('api_key')
+    const articleCount = parseInt(settingsMap.get('article_count') ?? '20', 10)
+
     if (!apiKey) {
       return NextResponse.json({ success: false, message: '请先在系统设置中配置 OneAPI Key' }, { status: 400 })
     }
@@ -60,7 +62,7 @@ export async function POST(request: NextRequest) {
 
     // Crawl each account
     for (const account of accounts) {
-      const result = await fetchAccountArticles(apiKey, account.wx_id)
+      const result = await fetchAccountArticles(apiKey, account.wx_id, articleCount)
       
       if (!result.success) {
         totalFailed++
