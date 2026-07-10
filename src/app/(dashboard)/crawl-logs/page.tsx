@@ -28,17 +28,18 @@ export default function CrawlLogsPage() {
   useEffect(() => { fetchData() }, [fetchData])
 
   const columns = [
-    { title: '开始时间', dataIndex: 'started_at', key: 'started_at', width: 180, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-' },
-    { title: '结束时间', dataIndex: 'finished_at', key: 'finished_at', width: 180, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-' },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 100, render: (v: string) => {
+    { title: '开始时间', dataIndex: 'started_at', key: 'started_at', width: 160, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { title: '结束时间', dataIndex: 'finished_at', key: 'finished_at', width: 160, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 90, render: (v: string) => {
       const colors: Record<string, string> = { success: 'green', partial: 'orange', failed: 'red', running: 'blue' }
       const labels: Record<string, string> = { success: '成功', partial: '部分成功', failed: '失败', running: '运行中' }
       return <Tag color={colors[v] || 'default'}>{labels[v] || v}</Tag>
     }},
-    { title: '采集账号数', dataIndex: 'accounts_crawled', key: 'accounts_crawled', width: 100, align: 'center' as const },
-    { title: '发现文章', dataIndex: 'articles_found', key: 'articles_found', width: 100, align: 'center' as const },
-    { title: '命中文章', dataIndex: 'articles_matched', key: 'articles_matched', width: 100, align: 'center' as const },
-    { title: '错误信息', dataIndex: 'error_message', key: 'error_message', ellipsis: true, render: (v: string) => v || '-' },
+    { title: '采集账号数', dataIndex: 'accounts_crawled', key: 'accounts_crawled', width: 90, align: 'center' as const, render: (v: number) => v ?? 0 },
+    { title: '发现文章', dataIndex: 'articles_found', key: 'articles_found', width: 80, align: 'center' as const, render: (v: number) => v ?? 0 },
+    { title: '命中文章', dataIndex: 'articles_matched', key: 'articles_matched', width: 80, align: 'center' as const, render: (v: number) => v ?? 0 },
+    { title: '新增入库', dataIndex: 'articles_new', key: 'articles_new', width: 80, align: 'center' as const, render: (v: number) => v ?? 0 },
+    { title: '错误信息', dataIndex: 'message', key: 'message', ellipsis: true, render: (v: string) => v || '-' },
   ]
 
   return (

@@ -32,7 +32,7 @@ export async function GET() {
       // Recent crawl logs (last 5)
       client
         .from('crawl_logs')
-        .select('id, status, started_at, finished_at, articles_found, articles_new, articles_matched, message')
+        .select('id, status, started_at, finished_at, accounts_crawled, articles_found, articles_new, articles_matched, message')
         .order('started_at', { ascending: false })
         .limit(5),
     ])

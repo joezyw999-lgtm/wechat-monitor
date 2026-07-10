@@ -44,13 +44,15 @@ export default function DashboardPage() {
   }, [refresh])
 
   const logColumns = [
-    { title: '时间', dataIndex: 'started_at', key: 'started_at', width: 160, render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm') },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 100, render: (v: string) => {
+    { title: '时间', dataIndex: 'started_at', key: 'started_at', width: 140, render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm') },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 80, render: (v: string) => {
       const colors: Record<string, string> = { success: 'green', partial: 'orange', failed: 'red', running: 'blue' }
       return <Tag color={colors[v] || 'default'}>{v}</Tag>
     }},
-    { title: '发现', dataIndex: 'articles_found', key: 'articles_found', width: 80 },
-    { title: '命中', dataIndex: 'articles_matched', key: 'articles_matched', width: 80 },
+    { title: '采集账号', dataIndex: 'accounts_crawled', key: 'accounts_crawled', width: 70, align: 'center' as const, render: (v: number) => v ?? 0 },
+    { title: '发现', dataIndex: 'articles_found', key: 'articles_found', width: 60, align: 'center' as const, render: (v: number) => v ?? 0 },
+    { title: '命中', dataIndex: 'articles_matched', key: 'articles_matched', width: 60, align: 'center' as const, render: (v: number) => v ?? 0 },
+    { title: '新增', dataIndex: 'articles_new', key: 'articles_new', width: 60, align: 'center' as const, render: (v: number) => v ?? 0 },
   ]
 
   return (
