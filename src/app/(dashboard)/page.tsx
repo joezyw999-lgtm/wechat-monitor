@@ -3,12 +3,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Card, Row, Col, Statistic, Button, message, Table, Tag, Space } from 'antd'
 import { SyncOutlined, FileTextOutlined, UserOutlined, CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons'
-import { useRouter } from 'next/navigation'
 import dayjs from 'dayjs'
 import { useCachedFetch } from '@/lib/cache'
 
 export default function DashboardPage() {
-  const router = useRouter()
   const [crawlLoading, setCrawlLoading] = useState(false)
 
   const { data: stats, loading, refresh } = useCachedFetch(

@@ -71,6 +71,12 @@ export function useCachedFetch(
   const [loading, setLoading] = useState(!data && enabled)
   const [error, setError] = useState<string | null>(null)
 
+  // Use ref to store fetcher to avoid dependency issues
+  const fetcherRef = useRef(fetcher)
+  useEffect(() => {
+    fetcherRef.current = fetcher
+  }, [fetcher])
+
   const fetchData = useCallback(async (forceRefresh = false) => {
     if (!enabled) return
     const cached = cache.get(key, maxAge)
@@ -83,7 +89,7 @@ export function useCachedFetch(
     setLoading(true)
     setError(null)
     try {
-      const result = await fetcher()
+      const result = await fetcherRef.current()
       cache.set(key, result)
       setData(result)
       return result
@@ -93,16 +99,16 @@ export function useCachedFetch(
     } finally {
       setLoading(false)
     }
-  }, [key, fetcher, maxAge, enabled, cache])
+  }, [key, maxAge, enabled, cache])
 
   const refresh = useCallback(() => fetchData(true), [fetchData])
 
-  // Auto-fetch on mount if no cached data
+  // Auto-fetch on mount if no cached data, only depend on key and enabled
   useEffect(() => {
     if (enabled && !data) {
       fetchData()
     }
-  }, [enabled, data, fetchData])
+  }, [enabled, fetchData])
 
   return { data, loading, error, refresh }
 }
