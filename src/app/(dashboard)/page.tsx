@@ -21,16 +21,6 @@ export default function DashboardPage() {
     }
   )
 
-  const { data: logsData, refresh: refreshLogs } = useCachedFetch(
-    'dashboard-logs',
-    async () => {
-      const res = await fetch('/api/crawl-logs?limit=5')
-      const data = await res.json()
-      if (data.success) return data.data
-      return { logs: [] }
-    }
-  )
-
   const handleCrawl = useCallback(async () => {
     setCrawlLoading(true)
     try {
@@ -41,9 +31,8 @@ export default function DashboardPage() {
       })
       const data = await res.json()
       if (data.success) {
-        message.success(`采集完成: 新增 ${data.data.newArticles} 篇, 命中 ${data.data.matchedArticles} 篇`)
+        message.success(`采集完成: 新增 ${data.data.articles_new} 篇, 命中 ${data.data.articles_matched} 篇`)
         refresh()
-        refreshLogs()
       } else {
         message.error(data.message || '采集失败')
       }
@@ -52,7 +41,7 @@ export default function DashboardPage() {
     } finally {
       setCrawlLoading(false)
     }
-  }, [refresh, refreshLogs])
+  }, [refresh])
 
   const logColumns = [
     { title: '时间', dataIndex: 'started_at', key: 'started_at', width: 160, render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm') },
@@ -92,7 +81,7 @@ export default function DashboardPage() {
       <Card 
         title="快捷操作" 
         style={{ marginBottom: 24 }}
-        extra={<Button icon={<ReloadOutlined />} onClick={() => { refresh(); refreshLogs() }}>刷新</Button>}
+        extra={<Button icon={<ReloadOutlined />} onClick={() => refresh()}>刷新</Button>}
       >
         <Space>
           <Button 
@@ -109,7 +98,7 @@ export default function DashboardPage() {
 
       <Card title="最近采集日志">
         <Table
-          dataSource={logsData?.logs || []}
+          dataSource={stats?.recentLogs || []}
           columns={logColumns}
           rowKey="id"
           pagination={false}

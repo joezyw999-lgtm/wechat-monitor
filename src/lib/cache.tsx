@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useRef, useEffect, ReactNode } from 'react'
 
 interface CacheEntry {
   data: any
@@ -96,6 +96,13 @@ export function useCachedFetch(
   }, [key, fetcher, maxAge, enabled, cache])
 
   const refresh = useCallback(() => fetchData(true), [fetchData])
+
+  // Auto-fetch on mount if no cached data
+  useEffect(() => {
+    if (enabled && !data) {
+      fetchData()
+    }
+  }, [enabled, data, fetchData])
 
   return { data, loading, error, refresh }
 }
