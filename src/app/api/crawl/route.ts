@@ -76,6 +76,15 @@ export async function POST(request: NextRequest) {
 
       for (const article of result.articles) {
         console.log(`[Crawl] Processing: ${article.title} | URL: ${article.url?.substring(0, 50)}...`)
+        
+        // Match keywords first - only save articles that match at least one keyword
+        const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
+        
+        if (matchedKw.length === 0) {
+          console.log(`[Crawl] Skipping (no keyword match): ${article.title}`)
+          continue
+        }
+        
         // Check for duplicates by original_url
         const { data: existing } = await client
           .from('articles')
@@ -88,9 +97,6 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Match keywords
-        const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
-
         // Insert article - use original_url instead of url
         const { error: insertError } = await client
           .from('articles')
@@ -102,7 +108,7 @@ export async function POST(request: NextRequest) {
             content: article.content || null,
             published_at: new Date(article.publish_time * 1000).toISOString(),
             unique_key: article.msg_id || null,
-            matched_keywords: matchedKw.length > 0 ? matchedKw : null
+            matched_keywords: matchedKw
           })
         if (insertError) {
           console.error(`[Crawl] Insert error for "${article.title}":`, insertError.message)
@@ -110,9 +116,9 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        console.log(`[Crawl] Inserted: ${article.title}`)
+        console.log(`[Crawl] Inserted: ${article.title} (matched: ${matchedKw.join(', ')})`)
         totalNew++
-        if (matchedKw.length > 0) totalMatched++
+        totalMatched++
       }
     }
 

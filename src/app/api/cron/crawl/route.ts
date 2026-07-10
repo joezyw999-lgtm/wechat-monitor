@@ -69,6 +69,14 @@ export async function GET() {
       totalFound += result.articles.length
 
       for (const article of result.articles) {
+        // Match keywords first - only save articles that match at least one keyword
+        const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
+        
+        if (matchedKw.length === 0) {
+          console.log(`[Crawl] Skipping (no keyword match): ${article.title}`)
+          continue
+        }
+        
         // Check for duplicates by original_url
         const { data: existing } = await client
           .from('articles')
@@ -81,8 +89,6 @@ export async function GET() {
           continue
         }
 
-        const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
-
         // Insert article - use original_url instead of url
         await client.from('articles').insert({
           account_id: account.id,
@@ -91,11 +97,12 @@ export async function GET() {
           original_url: article.url,
           published_at: article.published_at || new Date().toISOString(),
           unique_key: article.msg_id || null,
-          matched_keywords: matchedKw.length > 0 ? matchedKw : null,
+          matched_keywords: matchedKw,
         })
 
+        console.log(`[Crawl] Inserted: ${article.title} (matched: ${matchedKw.join(', ')})`)
         totalNew++
-        if (matchedKw.length > 0) totalMatched++
+        totalMatched++
       }
     }
 
