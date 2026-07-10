@@ -54,6 +54,7 @@ export async function POST(request: NextRequest) {
       .single()
     if (logError) throw logError
 
+    let totalFound = 0
     let totalNew = 0
     let totalMatched = 0
     let totalFailed = 0
@@ -71,14 +72,15 @@ export async function POST(request: NextRequest) {
 
       // Log how many articles were returned from API
       console.log(`[Crawl] Account ${account.name} (${account.wx_id}): API returned ${result.articles.length} articles`)
+      totalFound += result.articles.length
 
       for (const article of result.articles) {
         console.log(`[Crawl] Processing: ${article.title} | URL: ${article.url?.substring(0, 50)}...`)
-        // Check for duplicates by URL
+        // Check for duplicates by original_url
         const { data: existing } = await client
           .from('articles')
           .select('id')
-          .eq('url', article.url)
+          .eq('original_url', article.url)
           .maybeSingle()
 
         if (existing) {
@@ -89,15 +91,14 @@ export async function POST(request: NextRequest) {
         // Match keywords
         const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
 
-        // Insert article
+        // Insert article - use original_url instead of url
         const { error: insertError } = await client
           .from('articles')
           .insert({
             account_id: account.id,
             title: article.title,
-            url: article.url,
+            original_url: article.url,
             summary: article.digest || null,
-            cover_image: article.cover || null,
             content: article.content || null,
             published_at: new Date(article.publish_time * 1000).toISOString(),
             unique_key: article.msg_id || null,
@@ -115,30 +116,33 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Update crawl log
+    // Update crawl log - use correct field names
     await client
       .from('crawl_logs')
       .update({
         status: totalFailed > 0 ? 'partial' : 'success',
         finished_at: new Date().toISOString(),
         accounts_crawled: accounts.length,
+        articles_found: totalFound,
         articles_new: totalNew,
         articles_matched: totalMatched,
-        error_message: errors.length > 0 ? errors.join('; ') : null
+        message: errors.length > 0 ? errors.join('; ') : null
       })
       .eq('id', logData.id)
 
     return NextResponse.json({
       success: true,
+      message: `采集完成: 发现 ${totalFound} 篇, 新增 ${totalNew} 篇, 命中关键词 ${totalMatched} 篇`,
       data: {
-        accountsCrawled: accounts.length,
-        newArticles: totalNew,
-        matchedArticles: totalMatched,
-        failedAccounts: totalFailed,
+        accounts_crawled: accounts.length,
+        articles_found: totalFound,
+        articles_new: totalNew,
+        articles_matched: totalMatched,
         errors
       }
     })
   } catch (error: any) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 })
+    console.error('[Crawl] Error:', error)
+    return NextResponse.json({ success: false, message: error.message || '采集失败' }, { status: 500 })
   }
 }

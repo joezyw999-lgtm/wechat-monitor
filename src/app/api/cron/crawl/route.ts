@@ -49,6 +49,7 @@ export async function GET() {
       .select()
       .single()
 
+    let totalFound = 0
     let totalNew = 0
     let totalMatched = 0
     let totalFailed = 0
@@ -65,12 +66,14 @@ export async function GET() {
 
       // Log how many articles were returned from API
       console.log(`[Crawl] Account ${account.name} (${account.wx_id}): API returned ${result.articles.length} articles`)
+      totalFound += result.articles.length
 
       for (const article of result.articles) {
+        // Check for duplicates by original_url
         const { data: existing } = await client
           .from('articles')
           .select('id')
-          .eq('url', article.url)
+          .eq('original_url', article.url)
           .maybeSingle()
 
         if (existing) {
@@ -80,13 +83,15 @@ export async function GET() {
 
         const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
 
+        // Insert article - use original_url instead of url
         await client.from('articles').insert({
           account_id: account.id,
           title: article.title,
           summary: article.digest || '',
-          url: article.url,
+          original_url: article.url,
           published_at: article.published_at || new Date().toISOString(),
-          matched_keywords: matchedKw.length > 0 ? matchedKw.join(',') : null,
+          unique_key: article.msg_id || null,
+          matched_keywords: matchedKw.length > 0 ? matchedKw : null,
         })
 
         totalNew++
@@ -97,15 +102,16 @@ export async function GET() {
     await client
       .from('crawl_logs')
       .update({
-        status: 'completed',
+        status: totalFailed > 0 ? 'partial' : 'success',
         message: errors.length > 0 ? errors.join('; ') : 'Success',
-        articles_found: totalNew,
+        articles_found: totalFound,
+        articles_new: totalNew,
         articles_matched: totalMatched,
         finished_at: new Date().toISOString(),
       })
       .eq('id', logData.id)
 
-    return NextResponse.json({ success: true, totalNew, totalMatched, totalFailed })
+    return NextResponse.json({ success: true, totalFound, totalNew, totalMatched, totalFailed })
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
