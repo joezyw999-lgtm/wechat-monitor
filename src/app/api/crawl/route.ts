@@ -38,10 +38,10 @@ export async function POST(request: NextRequest) {
     // Get active keywords
     const { data: keywordsData, error: kwError } = await client
       .from('keywords')
-      .select('keyword')
+      .select('word')
       .eq('status', 'active')
     if (kwError) throw kwError
-    const keywords = keywordsData?.map((k: any) => k.keyword) || []
+    const keywords = keywordsData?.map((k: any) => k.word) || []
 
     // Create crawl log
     const { data: logData, error: logError } = await client

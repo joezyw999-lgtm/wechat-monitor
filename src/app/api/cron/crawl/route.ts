@@ -38,9 +38,9 @@ export async function GET() {
     // Get active keywords
     const { data: keywordsData } = await client
       .from('keywords')
-      .select('keyword')
+      .select('word')
       .eq('status', 'active')
-    const keywords = keywordsData?.map((k: any) => k.keyword) || []
+    const keywords = keywordsData?.map((k: any) => k.word) || []
 
     // Create crawl log
     const { data: logData } = await client
