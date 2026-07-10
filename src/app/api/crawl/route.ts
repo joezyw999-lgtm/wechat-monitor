@@ -98,7 +98,6 @@ export async function POST(request: NextRequest) {
             url: article.url,
             summary: article.digest || null,
             cover_image: article.cover || null,
-            author: article.author || account.name,
             content: article.content || null,
             published_at: new Date(article.publish_time * 1000).toISOString(),
             unique_key: article.msg_id || null,
