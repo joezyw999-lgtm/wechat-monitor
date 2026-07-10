@@ -63,6 +63,9 @@ export async function GET() {
         continue
       }
 
+      // Log how many articles were returned from API
+      console.log(`[Crawl] Account ${account.name} (${account.wx_id}): API returned ${result.articles.length} articles`)
+
       for (const article of result.articles) {
         const { data: existing } = await client
           .from('articles')
@@ -70,7 +73,10 @@ export async function GET() {
           .eq('url', article.url)
           .maybeSingle()
 
-        if (existing) continue
+        if (existing) {
+          console.log(`[Crawl] Skipping duplicate: ${article.title}`)
+          continue
+        }
 
         const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
 

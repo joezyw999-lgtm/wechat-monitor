@@ -69,6 +69,9 @@ export async function POST(request: NextRequest) {
         continue
       }
 
+      // Log how many articles were returned from API
+      console.log(`[Crawl] Account ${account.name} (${account.wx_id}): API returned ${result.articles.length} articles`)
+
       for (const article of result.articles) {
         // Check for duplicates by URL
         const { data: existing } = await client
@@ -77,7 +80,10 @@ export async function POST(request: NextRequest) {
           .eq('url', article.url)
           .maybeSingle()
 
-        if (existing) continue
+        if (existing) {
+          console.log(`[Crawl] Skipping duplicate: ${article.title}`)
+          continue
+        }
 
         // Match keywords
         const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
