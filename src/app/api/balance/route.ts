@@ -57,8 +57,8 @@ export async function GET(request: NextRequest) {
       }
     } else if (type === 'usage') {
       // Fetch usage records
-      const startDate = searchParams.get('startDate')
-      const endDate = searchParams.get('endDate')
+      let startDate = searchParams.get('startDate')
+      let endDate = searchParams.get('endDate')
 
       if (!startDate || !endDate) {
         // Default to last 30 days

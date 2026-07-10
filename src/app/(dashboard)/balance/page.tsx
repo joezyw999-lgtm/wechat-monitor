@@ -161,7 +161,7 @@ export default function BalancePage() {
               precision={4}
               prefix={<WalletOutlined />}
               suffix="元"
-              valueStyle={{ color: (balance ?? 0) > 10 ? '#3f8600' : (balance ?? 0) > 0 ? '#faad14' : '#cf1322' }}
+              styles={{ content: { color: (balance ?? 0) > 10 ? '#3f8600' : (balance ?? 0) > 0 ? '#faad14' : '#cf1322' } }}
             />
             {balance !== null && balance <= 10 && (
               <Alert
@@ -184,7 +184,7 @@ export default function BalancePage() {
               precision={4}
               prefix={<DollarOutlined />}
               suffix="元"
-              valueStyle={{ color: '#cf1322' }}
+              styles={{ content: { color: '#cf1322' } }}
             />
             <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
               {dateRange[0].format('MM/DD')} - {dateRange[1].format('MM/DD')}
