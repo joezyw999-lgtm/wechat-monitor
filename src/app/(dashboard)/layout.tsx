@@ -9,7 +9,8 @@ import {
   FileTextOutlined, 
   SyncOutlined,
   SettingOutlined,
-  LogoutOutlined
+  LogoutOutlined,
+  WalletOutlined
 } from '@ant-design/icons'
 import { useRouter, usePathname } from 'next/navigation'
 import { CacheProvider } from '@/lib/cache'
@@ -22,6 +23,7 @@ const menuItems = [
   { key: '/keywords', icon: <KeyOutlined />, label: '关键词管理' },
   { key: '/articles', icon: <FileTextOutlined />, label: '文章列表' },
   { key: '/crawl-logs', icon: <SyncOutlined />, label: '采集日志' },
+  { key: '/balance', icon: <WalletOutlined />, label: '余额监控' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ]
 
