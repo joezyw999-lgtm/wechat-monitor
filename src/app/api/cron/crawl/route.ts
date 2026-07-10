@@ -55,6 +55,14 @@ export async function GET() {
     let totalFailed = 0
     const errors: string[] = []
 
+    // Collect all articles from all accounts first
+    const allArticles: Array<{
+      account: any
+      article: any
+      matchedKw: string[]
+    }> = []
+
+    // Crawl each account and collect articles
     for (const account of accounts) {
       const result = await fetchAccountArticles(apiKey, account.wx_id, articleCount)
 
@@ -76,34 +84,68 @@ export async function GET() {
           console.log(`[Crawl] Skipping (no keyword match): ${article.title}`)
           continue
         }
-        
-        // Check for duplicates by original_url
+
+        allArticles.push({ account, article, matchedKw })
+      }
+    }
+
+    // Batch deduplication: get all existing URLs from database in one query
+    const allUrls = allArticles.map(a => a.article.url).filter(Boolean)
+    let existingUrls = new Set<string>()
+
+    if (allUrls.length > 0) {
+      // Query in batches of 100 to avoid URL length limits
+      const batchSize = 100
+      for (let i = 0; i < allUrls.length; i += batchSize) {
+        const batch = allUrls.slice(i, i + batchSize)
         const { data: existing } = await client
           .from('articles')
-          .select('id')
-          .eq('original_url', article.url)
-          .maybeSingle()
+          .select('original_url')
+          .in('original_url', batch)
 
         if (existing) {
-          console.log(`[Crawl] Skipping duplicate: ${article.title}`)
-          continue
+          existing.forEach((e: any) => existingUrls.add(e.original_url))
         }
-
-        // Insert article - use original_url instead of url
-        await client.from('articles').insert({
-          account_id: account.id,
-          title: article.title,
-          summary: article.digest || '',
-          original_url: article.url,
-          published_at: article.published_at || new Date().toISOString(),
-          unique_key: article.msg_id || null,
-          matched_keywords: matchedKw,
-        })
-
-        console.log(`[Crawl] Inserted: ${article.title} (matched: ${matchedKw.join(', ')})`)
-        totalNew++
-        totalMatched++
       }
+    }
+
+    console.log(`[Crawl] Found ${existingUrls.size} existing URLs in database`)
+
+    // Filter out duplicates and prepare for batch insert
+    const newArticles = allArticles.filter(a => !existingUrls.has(a.article.url))
+    console.log(`[Crawl] ${newArticles.length} new articles to insert (after dedup)`)
+
+    // Batch insert new articles
+    if (newArticles.length > 0) {
+      const insertData = newArticles.map(a => ({
+        account_id: a.account.id,
+        title: a.article.title,
+        original_url: a.article.url,
+        summary: a.article.digest || null,
+        content: a.article.content || null,
+        published_at: a.article.published_at || new Date().toISOString(),
+        unique_key: a.article.msg_id || null,
+        matched_keywords: a.matchedKw
+      }))
+
+      // Insert in batches of 50
+      const insertBatchSize = 50
+      for (let i = 0; i < insertData.length; i += insertBatchSize) {
+        const batch = insertData.slice(i, i + insertBatchSize)
+        const { error: insertError } = await client
+          .from('articles')
+          .insert(batch)
+
+        if (insertError) {
+          console.error(`[Crawl] Batch insert error:`, insertError.message)
+          errors.push(`Batch insert error: ${insertError.message}`)
+        } else {
+          totalNew += batch.length
+          console.log(`[Crawl] Inserted batch of ${batch.length} articles`)
+        }
+      }
+
+      totalMatched = newArticles.length
     }
 
     await client
