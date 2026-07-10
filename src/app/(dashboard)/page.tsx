@@ -9,15 +9,14 @@ import { useCachedFetch } from '@/lib/cache'
 export default function DashboardPage() {
   const [crawlLoading, setCrawlLoading] = useState(false)
 
-  const { data: stats, loading, refresh } = useCachedFetch(
-    'dashboard-stats',
-    async () => {
-      const res = await fetch('/api/dashboard')
-      const data = await res.json()
-      if (data.success) return data.data
-      throw new Error(data.message || 'Failed to fetch')
-    }
-  )
+  const fetchStats = useCallback(async () => {
+    const res = await fetch('/api/dashboard')
+    const data = await res.json()
+    if (data.success) return data.data
+    throw new Error(data.message || 'Failed to fetch')
+  }, [])
+
+  const { data: stats, loading, refresh } = useCachedFetch('dashboard-stats', fetchStats)
 
   const handleCrawl = useCallback(async () => {
     setCrawlLoading(true)
