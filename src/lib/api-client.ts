@@ -25,8 +25,8 @@ export async function fetchAccountArticles(
 ): Promise<CrawlResult> {
   try {
     const response = await axios.post(
-      `${API_BASE}/api/wechat/account/articles`,
-      { biz_id: bizId, need_content: false },
+      `${API_BASE}/api/wechat-mp-v2/articles`,
+      { username: bizId, need_content: false },
       {
         headers: {
           'Content-Type': 'application/json',
