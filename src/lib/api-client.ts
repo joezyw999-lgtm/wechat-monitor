@@ -27,8 +27,8 @@ export async function fetchAccountArticles(
 ): Promise<CrawlResult> {
   try {
     const response = await axios.post(
-      `${API_BASE}/api/wechat-mp-v2/articles`,
-      { username: bizId, count, need_content: false },
+      `${API_BASE}/api/wechat-mp-v2/fetch_mp_article_list`,
+      { username: bizId, count },
       {
         headers: {
           'Content-Type': 'application/json',
@@ -39,7 +39,36 @@ export async function fetchAccountArticles(
     )
 
     if (response.data.code === 200) {
-      const articles = response.data.data?.articles || []
+      const rawArticles = response.data.data?.articles || []
+      
+      // Parse the nested structure: articles[i].appMsg.detailInfo[0]
+      const articles: ArticleData[] = rawArticles
+        .map((item: any) => {
+          const appMsg = item?.appMsg
+          if (!appMsg) return null
+          
+          const baseInfo = appMsg.baseInfo || {}
+          const detailInfo = appMsg.detailInfo || []
+          const detail = detailInfo[0] || {}
+          
+          if (!detail.contentUrl) return null
+          
+          return {
+            title: detail.title || '',
+            url: detail.contentUrl || '',
+            digest: detail.digest || '',
+            cover: detail.coverImgUrl || '',
+            author: detail.author || '',
+            content: '', // not fetching full content
+            publish_time: baseInfo.createTime || 0,
+            published_at: baseInfo.createTime
+              ? new Date(baseInfo.createTime * 1000).toISOString()
+              : undefined,
+            msg_id: baseInfo.appMsgId ? String(baseInfo.appMsgId) : undefined,
+          } as ArticleData
+        })
+        .filter(Boolean) as ArticleData[]
+
       return { success: true, articles }
     } else {
       return { success: false, articles: [], error: response.data.message || 'API returned error' }
