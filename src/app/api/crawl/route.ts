@@ -47,7 +47,6 @@ export async function POST(request: NextRequest) {
     const { data: logData, error: logError } = await client
       .from('crawl_logs')
       .insert({
-        trigger_type: 'manual',
         status: 'running',
         started_at: new Date().toISOString()
       })
