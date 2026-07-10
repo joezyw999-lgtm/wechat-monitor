@@ -73,6 +73,7 @@ export async function POST(request: NextRequest) {
       console.log(`[Crawl] Account ${account.name} (${account.wx_id}): API returned ${result.articles.length} articles`)
 
       for (const article of result.articles) {
+        console.log(`[Crawl] Processing: ${article.title} | URL: ${article.url?.substring(0, 50)}...`)
         // Check for duplicates by URL
         const { data: existing } = await client
           .from('articles')
@@ -104,10 +105,12 @@ export async function POST(request: NextRequest) {
             matched_keywords: matchedKw.length > 0 ? matchedKw : null
           })
         if (insertError) {
+          console.error(`[Crawl] Insert error for "${article.title}":`, insertError.message)
           errors.push(`Insert error: ${insertError.message}`)
           continue
         }
 
+        console.log(`[Crawl] Inserted: ${article.title}`)
         totalNew++
         if (matchedKw.length > 0) totalMatched++
       }
