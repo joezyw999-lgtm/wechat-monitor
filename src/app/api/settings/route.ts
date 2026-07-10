@@ -10,8 +10,17 @@ export async function GET() {
     if (error) throw error
 
     const settings: Record<string, string> = {}
+    const sensitiveKeys = ['api_key', 'oneapi_key']
     for (const item of data || []) {
-      settings[item.key] = item.value
+      if (sensitiveKeys.includes(item.key) && item.value) {
+        // Mask sensitive values: show first 6 and last 4 chars
+        const v = item.value as string
+        settings[item.key] = v.length > 10
+          ? v.slice(0, 6) + '****' + v.slice(-4)
+          : '****'
+      } else {
+        settings[item.key] = item.value
+      }
     }
 
     return NextResponse.json({ success: true, data: settings })
