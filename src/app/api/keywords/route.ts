@@ -22,8 +22,8 @@ export async function POST(request: NextRequest) {
     const { data, error } = await client
       .from('keywords')
       .insert({
-        keyword: body.keyword,
-        group_name: body.groupName || null,
+        word: body.word || body.keyword,
+        group_name: body.groupName || body.group_name || null,
         status: body.status || 'active'
       })
       .select()
@@ -42,8 +42,8 @@ export async function PUT(request: NextRequest) {
     const { data, error } = await client
       .from('keywords')
       .update({
-        keyword: body.keyword,
-        group_name: body.groupName || null,
+        word: body.word || body.keyword,
+        group_name: body.groupName || body.group_name || null,
         status: body.status,
         updated_at: new Date().toISOString()
       })
