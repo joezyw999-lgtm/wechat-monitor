@@ -73,7 +73,7 @@ export default function DashboardPage() {
         </Col>
         <Col span={6}>
           <Card hoverable>
-            <Statistic title="未读文章" value={stats?.unreadCount || 0} prefix={<FileTextOutlined />} loading={loading} valueStyle={{ color: '#cf1322' }} />
+            <Statistic title="未读文章" value={stats?.unreadCount || 0} prefix={<FileTextOutlined />} loading={loading} styles={{ content: { color: '#cf1322' } }} />
           </Card>
         </Col>
       </Row>
