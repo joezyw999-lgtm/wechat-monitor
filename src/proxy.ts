@@ -32,9 +32,9 @@ async function verifyJWT(token: string): Promise<boolean> {
     );
 
     const data = encoder.encode(`${headerB64}.${payloadB64}`);
-    const signature = base64UrlToUint8Array(signatureB64);
+    const signatureBuf = base64UrlToUint8Array(signatureB64);
 
-    const valid = await crypto.subtle.verify('HMAC', key, signature, data);
+    const valid = await crypto.subtle.verify('HMAC', key, signatureBuf as unknown as ArrayBuffer, data);
     if (!valid) return false;
 
     // 检查过期时间
