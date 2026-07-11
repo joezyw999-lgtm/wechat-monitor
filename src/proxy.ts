@@ -15,7 +15,7 @@ function isApiPath(path: string): boolean {
   return path.startsWith('/api/');
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 公共路径不校验
