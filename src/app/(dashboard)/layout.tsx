@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Layout, Menu, Spin } from 'antd'
+import { useState, useCallback } from 'react'
+import { Layout, Menu } from 'antd'
 import { 
   DashboardOutlined, 
   UserOutlined, 
@@ -34,23 +34,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const [username, setUsername] = useState('')
   const [transitioning, setTransitioning] = useState(false)
 
-  const [checking, setChecking] = useState(true)
-
-  useEffect(() => {
-    // Verify session via API (reads HttpOnly cookie)
-    fetch('/api/auth/me')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success) {
-          setUsername(data.data.username)
-        } else {
-          router.push('/login')
-        }
-      })
-      .catch(() => router.push('/login'))
-      .finally(() => setChecking(false))
-  }, [router])
-
   const handleNavigate = useCallback((key: string) => {
     if (key === pathname) return
     setTransitioning(true)
@@ -62,14 +45,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     fetch('/api/auth/logout', { method: 'POST' })
       .finally(() => router.push('/login'))
   }, [router])
-
-  if (checking) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-        <Spin size="large" />
-      </div>
-    )
-  }
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
