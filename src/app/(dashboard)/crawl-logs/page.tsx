@@ -20,8 +20,12 @@ export default function CrawlLogsPage() {
       if (result.success) {
         setData(result.data.list)
         setHasMore(result.data.hasMore)
+      } else {
+        message.error(result.message || '获取采集日志失败')
       }
-    } catch (error) { console.error(error) }
+    } catch (error: any) {
+      message.error(error?.message || '获取采集日志失败')
+    }
     finally { setLoading(false) }
   }, [page, pageSize])
 

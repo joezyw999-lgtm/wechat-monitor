@@ -148,17 +148,20 @@ export async function GET() {
       totalMatched = newArticles.length
     }
 
-    await client
+    const { error: updateLogError } = await client
       .from('crawl_logs')
       .update({
-        status: totalFailed > 0 ? 'partial' : 'success',
-        message: errors.length > 0 ? errors.join('; ') : 'Success',
+        status: totalFailed > 0 || errors.length > 0 ? 'partial' : 'success',
+        message: errors.length > 0 ? errors.join('; ') : null,
+        accounts_crawled: accounts.length,
         articles_found: totalFound,
         articles_new: totalNew,
         articles_matched: totalMatched,
         finished_at: new Date().toISOString(),
       })
       .eq('id', logData.id)
+
+    if (updateLogError) throw updateLogError
 
     return NextResponse.json({ success: true, totalFound, totalNew, totalMatched, totalFailed })
   } catch (error: any) {

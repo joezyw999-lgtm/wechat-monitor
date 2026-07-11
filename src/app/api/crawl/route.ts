@@ -158,10 +158,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Update crawl log - use correct field names
-    await client
+    const { error: updateLogError } = await client
       .from('crawl_logs')
       .update({
-        status: totalFailed > 0 ? 'partial' : 'success',
+        status: totalFailed > 0 || errors.length > 0 ? 'partial' : 'success',
         finished_at: new Date().toISOString(),
         accounts_crawled: accounts.length,
         articles_found: totalFound,
@@ -170,6 +170,8 @@ export async function POST(request: NextRequest) {
         message: errors.length > 0 ? errors.join('; ') : null
       })
       .eq('id', logData.id)
+
+    if (updateLogError) throw updateLogError
 
     return NextResponse.json({
       success: true,
