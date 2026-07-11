@@ -112,10 +112,7 @@ export default function AccountsPage() {
     finally { setCrawlLoading(null) }
   }, [cache])
 
-  const handleFileChange: UploadProps['onChange'] = async (info) => {
-    const file = info.file.originFileObj
-    if (!file) return
-
+  const handleImportFile = async (file: File) => {
     setImporting(true)
     setImportResult(null)
 
@@ -129,16 +126,14 @@ export default function AccountsPage() {
       })
       const result = await res.json()
 
-      if (result.success || result.data) {
+      if (result.success) {
         setImportResult(result.data)
-        if (result.success) {
-          message.success(result.message)
-          fetchData()
-          cache.invalidate('dashboard-stats')
-        } else {
-          message.error(result.message)
-        }
+        message.success(result.message || '导入完成')
+        cache.invalidate('accounts-list')
+        cache.invalidate('dashboard-stats')
+        await fetchData()
       } else {
+        setImportResult(result.data || null)
         message.error(result.message || '导入失败')
       }
     } catch (error: any) {
@@ -178,8 +173,10 @@ export default function AccountsPage() {
   const uploadProps: UploadProps = {
     accept: '.xlsx,.xls',
     showUploadList: false,
-    beforeUpload: () => false,
-    onChange: handleFileChange,
+    beforeUpload: async (file) => {
+      await handleImportFile(file)
+      return false
+    },
   }
 
   return (
