@@ -123,10 +123,11 @@ export async function PUT(request: NextRequest) {
         query = query.eq('is_read', filters.isRead === 'true' || filters.isRead === true)
       }
 
-      const { error, count } = await query.select('id', { count: 'exact', head: true })
+      const { error } = await query.select('id')
       if (error) throw error
+      const updated = (query as any).count || 0
 
-      return NextResponse.json({ success: true, data: { updated: count || 0 } })
+      return NextResponse.json({ success: true, data: { updated } })
     }
 
     // 单篇更新
