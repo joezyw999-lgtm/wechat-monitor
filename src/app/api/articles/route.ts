@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       query = query.gte('published_at', startDate)
     }
     if (endDate) {
-      query = query.lte('published_at', endDate)
+      query = query.lte('published_at', `${endDate} 23:59:59`)
     }
     if (isRead !== null && isRead !== undefined) {
       query = query.eq('is_read', isRead === 'true')
@@ -59,14 +59,48 @@ export async function GET(request: NextRequest) {
   }
 }
 
+export async function DELETE(request: NextRequest) {
+  const session = await requireAuth(request)
+  if (session instanceof Response) return session
+
+  try {
+    const body = await request.json()
+    const ids = body.ids
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json(
+        { success: false, message: '请选择要删除的文章' },
+        { status: 400 }
+      )
+    }
+
+    const client = getSupabaseServiceClient()
+    const { error } = await client
+      .from('articles')
+      .delete()
+      .in('id', ids)
+
+    if (error) throw error
+
+    return NextResponse.json({
+      success: true,
+      data: { deleted: ids.length }
+    })
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, message: error.message || '删除失败' },
+      { status: 500 }
+    )
+  }
+}
+
 export async function PUT(request: NextRequest) {
   const session = await requireAuth(request)
   if (session instanceof Response) return session
 
   try {
-    const { searchParams } = new URL(request.url)
     const body = await request.json()
-    const client = getSupabaseServiceClient() as any
+    const client = getSupabaseServiceClient()
     const { data, error } = await client
       .from('articles')
       .update({ is_read: body.isRead, updated_at: new Date().toISOString() })
