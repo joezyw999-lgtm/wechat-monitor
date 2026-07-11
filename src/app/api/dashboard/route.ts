@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase'
 import { requireAuth } from '@/lib/auth'
+import { fetchAccountBalance } from '@/lib/api-client'
 
 export async function GET(request: NextRequest) {
   const session = await requireAuth(request)
@@ -8,43 +9,44 @@ export async function GET(request: NextRequest) {
 
   try {
     const client = getSupabaseServiceClient() as any
-    
-    // Run all queries in parallel using Promise.all
+
+    // Run database queries in parallel
     const [
       { count: accountCount, error: accError },
-      { count: articleCount, error: artError },
       { count: unreadCount, error: unreadError },
       { data: logs, error: logError },
+      { data: settings, error: settingsError },
     ] = await Promise.all([
       // Active accounts count
       client
         .from('accounts')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'active'),
-      
-      // Total articles count
-      client
-        .from('articles')
-        .select('*', { count: 'exact', head: true }),
-      
+
       // Unread articles count
       client
         .from('articles')
         .select('*', { count: 'exact', head: true })
         .eq('is_read', false),
-      
+
       // Recent crawl logs (last 5)
       client
         .from('crawl_logs')
         .select('id, status, started_at, finished_at, accounts_crawled, articles_found, articles_new, articles_matched, message')
         .order('started_at', { ascending: false })
         .limit(5),
+
+      // Get API key settings
+      client
+        .from('settings')
+        .select('key, value')
+        .in('key', ['oneapi_key', 'api_key']),
     ])
 
     if (accError) throw accError
-    if (artError) throw artError
     if (unreadError) throw unreadError
     if (logError) throw logError
+    if (settingsError) throw settingsError
 
     // Today's article count
     const today = new Date()
@@ -55,13 +57,25 @@ export async function GET(request: NextRequest) {
       .gte('created_at', today.toISOString())
     if (todayError) throw todayError
 
+    // Fetch balance (fail silently, don't block other data)
+    let balance: number | null = null
+    try {
+      const apiKey = settings?.find((s: any) => s.key === 'oneapi_key')?.value
+        || settings?.find((s: any) => s.key === 'api_key')?.value
+      if (apiKey && !apiKey.includes('****')) {
+        balance = await fetchAccountBalance(apiKey)
+      }
+    } catch (e) {
+      // Balance fetch failed, ignore
+    }
+
     return NextResponse.json({
       success: true,
       data: {
         accountCount: accountCount || 0,
-        articleCount: articleCount || 0,
         todayArticleCount: todayCount || 0,
         unreadCount: unreadCount || 0,
+        balance,
         recentLogs: logs || []
       }
     })

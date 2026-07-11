@@ -95,6 +95,28 @@ export async function fetchAccountArticles(
   }
 }
 
+export async function fetchAccountBalance(apiKey: string): Promise<number | null> {
+  try {
+    const response = await axios.post(
+      `${API_BASE}/back/user/balance`,
+      {},
+      { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 10000 }
+    )
+    const data = response.data
+    if (data.code === 200 && data.data != null) {
+      if (typeof data.data === 'number') return data.data
+      if (typeof data.data.balance === 'number') return data.data.balance
+      if (typeof data.data === 'object') {
+        const v = Object.values(data.data).find(x => typeof x === 'number')
+        if (typeof v === 'number') return v
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 export function matchKeywords(
   title: string,
   digest: string,

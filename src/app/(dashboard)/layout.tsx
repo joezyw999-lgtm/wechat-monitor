@@ -18,7 +18,7 @@ import { CacheProvider } from '@/lib/cache'
 const { Sider, Content, Header } = Layout
 
 const menuItems = [
-  { key: '/', icon: <DashboardOutlined />, label: '仪表盘' },
+  { key: '/', icon: <DashboardOutlined />, label: '数据监控' },
   { key: '/accounts', icon: <UserOutlined />, label: '公众号管理' },
   { key: '/keywords', icon: <KeyOutlined />, label: '关键词管理' },
   { key: '/articles', icon: <FileTextOutlined />, label: '文章列表' },

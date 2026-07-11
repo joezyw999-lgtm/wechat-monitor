@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Card, Row, Col, Statistic, Button, message, Table, Tag, Space } from 'antd'
-import { SyncOutlined, FileTextOutlined, UserOutlined, CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import { SyncOutlined, WalletOutlined, UserOutlined, CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useCachedFetch } from '@/lib/cache'
 
@@ -62,17 +62,24 @@ export default function DashboardPage() {
         </Col>
         <Col span={6}>
           <Card hoverable>
-            <Statistic title="文章总数" value={stats?.articleCount || 0} prefix={<FileTextOutlined />} loading={loading} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card hoverable>
             <Statistic title="今日新增" value={stats?.todayArticleCount || 0} prefix={<CheckCircleOutlined />} loading={loading} />
           </Card>
         </Col>
         <Col span={6}>
           <Card hoverable>
-            <Statistic title="未读文章" value={stats?.unreadCount || 0} prefix={<FileTextOutlined />} loading={loading} styles={{ content: { color: '#cf1322' } }} />
+            <Statistic title="未读文章" value={stats?.unreadCount || 0} prefix={<CheckCircleOutlined />} loading={loading} styles={{ content: { color: '#cf1322' } }} />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card hoverable>
+            <Statistic 
+              title="账户余额" 
+              value={stats?.balance != null ? stats.balance : null} 
+              prefix="¥" 
+              loading={loading} 
+              valueStyle={{ color: '#3f8600' }}
+              formatter={(value: any) => value != null ? value.toFixed(2) : '—'}
+            />
           </Card>
         </Col>
       </Row>
