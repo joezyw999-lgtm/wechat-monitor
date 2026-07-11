@@ -1,9 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { jwtVerify } from 'jose';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'wechat-monitor-default-secret-change-in-production'
-);
+const JWT_SECRET = process.env.JWT_SECRET || 'wechat-monitor-default-secret-change-in-production';
 
 const PUBLIC_PATHS = ['/login', '/api/auth/login'];
 
@@ -13,6 +10,55 @@ function isPublicPath(path: string): boolean {
 
 function isApiPath(path: string): boolean {
   return path.startsWith('/api/');
+}
+
+async function verifyJWT(token: string): Promise<boolean> {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+
+    const [headerB64, payloadB64, signatureB64] = parts;
+
+    // 用 Web Crypto API 验证签名
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(JWT_SECRET);
+
+    const key = await crypto.subtle.importKey(
+      'raw',
+      keyData,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+
+    const data = encoder.encode(`${headerB64}.${payloadB64}`);
+    const signature = base64UrlToUint8Array(signatureB64);
+
+    const valid = await crypto.subtle.verify('HMAC', key, signature, data);
+    if (!valid) return false;
+
+    // 检查过期时间
+    const payload = JSON.parse(atob(payloadB64));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function base64UrlToUint8Array(base64Url: string): Uint8Array {
+  const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+  const padding = base64.length % 4 === 0 ? 0 : 4 - (base64.length % 4);
+  const padded = base64 + '='.repeat(padding);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 export async function proxy(request: NextRequest) {
@@ -36,11 +82,9 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  try {
-    await jwtVerify(token, JWT_SECRET);
-    return NextResponse.next();
-  } catch {
-    // Token 无效，清除并跳转登录
+  const isValid = await verifyJWT(token);
+
+  if (!isValid) {
     if (isApiPath(pathname)) {
       return NextResponse.json(
         { error: '登录已过期' },
@@ -59,6 +103,8 @@ export async function proxy(request: NextRequest) {
     });
     return response;
   }
+
+  return NextResponse.next();
 }
 
 export const config = {
