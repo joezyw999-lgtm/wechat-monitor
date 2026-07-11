@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase'
+import { requireAuth } from '@/lib/auth'
 
 export async function GET(request: NextRequest) {
-  try {
+  const session = await requireAuth(request)
+  if (session instanceof Response) return session
     const { searchParams } = new URL(request.url)
     const page = parseInt(searchParams.get('page') || '1')
     const pageSize = parseInt(searchParams.get('pageSize') || '20')
@@ -56,7 +58,11 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
+  const session = await requireAuth(request)
+  if (session instanceof Response) return session
+
   try {
+    const { searchParams } = new URL(request.url)
     const body = await request.json()
     const client = getSupabaseServiceClient() as any
     const { data, error } = await client

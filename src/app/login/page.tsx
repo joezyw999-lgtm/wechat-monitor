@@ -19,9 +19,8 @@ export default function LoginPage() {
       })
       const data = await res.json()
       if (data.success) {
-        localStorage.setItem('username', values.username)
         message.success('登录成功')
-        router.push('/')
+        setTimeout(() => router.push('/'), 300)
       } else {
         message.error(data.message || '登录失败')
       }

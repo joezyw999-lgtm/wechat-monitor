@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase'
+import { requireAuth } from '@/lib/auth'
 import axios from 'axios'
 
 const API_BASE = 'https://api.getoneapi.com'
 
 // Get account balance
 export async function GET(request: NextRequest) {
+  const session = await requireAuth(request)
+  if (session instanceof Response) return session
+
   try {
     const { searchParams } = new URL(request.url)
     const type = searchParams.get('type') || 'balance' // balance | usage

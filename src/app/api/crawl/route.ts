@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase'
 import { fetchAccountArticles, matchKeywords } from '@/lib/api-client'
+import { requireAuth } from '@/lib/auth'
 
 export async function POST(request: NextRequest) {
+  const session = await requireAuth(request)
+  if (session instanceof Response) return session
+
   try {
     const body = await request.json()
     const accountId = body.accountId // optional, if not provided, crawl all

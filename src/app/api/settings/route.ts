@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase'
+import { requireAuth } from '@/lib/auth'
 
-export async function GET() {
+const ALLOWED_KEYS = ['api_key', 'oneapi_key', 'article_count', 'cron_expression']
+
+export async function GET(request: NextRequest) {
+  const session = await requireAuth(request)
+  if (session instanceof Response) return session
+
   try {
     const client = getSupabaseServiceClient() as any
     const { data, error } = await client
@@ -13,7 +19,6 @@ export async function GET() {
     const sensitiveKeys = ['api_key', 'oneapi_key']
     for (const item of data || []) {
       if (sensitiveKeys.includes(item.key) && item.value) {
-        // Mask sensitive values: show first 6 and last 4 chars
         const v = item.value as string
         settings[item.key] = v.length > 10
           ? v.slice(0, 6) + '****' + v.slice(-4)
@@ -30,11 +35,37 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
+  const session = await requireAuth(request)
+  if (session instanceof Response) return session
+
   try {
     const body = await request.json()
     const client = getSupabaseServiceClient() as any
 
     for (const [key, value] of Object.entries(body)) {
+      if (!ALLOWED_KEYS.includes(key)) {
+        return NextResponse.json(
+          { success: false, message: `不允许修改的配置项: ${key}` },
+          { status: 400 }
+        )
+      }
+
+      // 跳过掩码值（用户没改密码）
+      if ((key === 'api_key' || key === 'oneapi_key') && typeof value === 'string' && value.includes('****')) {
+        continue
+      }
+
+      // 类型校验
+      if (key === 'article_count') {
+        const num = Number(value)
+        if (isNaN(num) || num < 1 || num > 100) {
+          return NextResponse.json(
+            { success: false, message: '采集数量必须是 1-100 之间的整数' },
+            { status: 400 }
+          )
+        }
+      }
+
       const { error } = await client
         .from('settings')
         .upsert(

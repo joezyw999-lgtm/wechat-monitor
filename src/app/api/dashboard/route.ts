@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase'
+import { requireAuth } from '@/lib/auth'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const session = await requireAuth(request)
+  if (session instanceof Response) return session
+
   try {
     const client = getSupabaseServiceClient() as any
     
