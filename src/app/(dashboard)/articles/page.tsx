@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { Table, Button, Input, DatePicker, Select, Space, Tag, message, Modal } from 'antd'
-import { SearchOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons'
+import { SearchOutlined, ReloadOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useCache } from '@/lib/cache'
 
@@ -109,6 +109,38 @@ export default function ArticlesPage() {
     })
   }, [selectedRowKeys, cache, fetchData])
 
+  const handleMarkAllRead = useCallback(() => {
+    Modal.confirm({
+      title: '确认全部标记已读',
+      content: '确定将当前筛选条件下的所有文章标记为已读吗？',
+      okText: '确认',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const res = await fetch('/api/articles', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              markAll: true,
+              isRead: true,
+              filters
+            })
+          })
+          const result = await res.json()
+          if (result.success) {
+            message.success(`成功标记 ${result.data.updated} 篇为已读`)
+            cache.invalidate('dashboard-stats')
+            fetchData()
+          } else {
+            message.error(result.message || '操作失败')
+          }
+        } catch (error: any) {
+          message.error(error.message || '操作失败')
+        }
+      }
+    })
+  }, [filters, cache, fetchData])
+
   useEffect(() => {
     fetchData()
     fetch('/api/accounts').then(r => r.json()).then(r => r.success && setAccounts(r.data))
@@ -123,15 +155,7 @@ export default function ArticlesPage() {
       return keywords.map((k: string) => <Tag color="blue" key={k}>{k}</Tag>)
     }},
     { title: '发布时间', dataIndex: 'published_at', key: 'published_at', width: 160, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-' },
-    { title: '状态', dataIndex: 'is_read', key: 'is_read', width: 80, render: (v: boolean) => <Tag color={v ? 'default' : 'red'}>{v ? '已读' : '未读'}</Tag> },
-    {
-      title: '操作', key: 'action', width: 100,
-      render: (_: any, record: any) => (
-        <Button size="small" type="link" onClick={() => handleMarkRead(record.id, !record.is_read)}>
-          {record.is_read ? '标为未读' : '标为已读'}
-        </Button>
-      )
-    }
+    { title: '状态', dataIndex: 'is_read', key: 'is_read', width: 80, render: (v: boolean) => <Tag color={v ? 'default' : 'red'}>{v ? '已读' : '未读'}</Tag> }
   ]
 
   return (
@@ -167,6 +191,15 @@ export default function ArticlesPage() {
         />
         <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>搜索</Button>
         <Button icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>
+        <Popconfirm
+          title="确认全部标记已读"
+          description="将当前筛选条件下的所有文章标记为已读，确定要继续吗？"
+          onConfirm={handleMarkAllRead}
+          okText="确定"
+          cancelText="取消"
+        >
+          <Button icon={<CheckCircleOutlined />}>全部标记已读</Button>
+        </Popconfirm>
         <Button 
           danger 
           icon={<DeleteOutlined />}

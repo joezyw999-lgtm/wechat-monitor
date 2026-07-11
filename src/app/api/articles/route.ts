@@ -101,6 +101,35 @@ export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
     const client = getSupabaseServiceClient()
+
+    // 批量标记已读
+    if (body.markAll) {
+      const filters = body.filters || {}
+      let query = client.from('articles').update({ is_read: body.isRead, updated_at: new Date().toISOString() })
+
+      if (filters.keyword) {
+        query = query.or(`title.ilike.%${filters.keyword}%,summary.ilike.%${filters.keyword}%`)
+      }
+      if (filters.accountId) {
+        query = query.eq('account_id', filters.accountId)
+      }
+      if (filters.startDate) {
+        query = query.gte('published_at', filters.startDate)
+      }
+      if (filters.endDate) {
+        query = query.lte('published_at', `${filters.endDate} 23:59:59`)
+      }
+      if (filters.isRead !== undefined && filters.isRead !== null && filters.isRead !== '') {
+        query = query.eq('is_read', filters.isRead === 'true' || filters.isRead === true)
+      }
+
+      const { error, count } = await query.select('id', { count: 'exact', head: true })
+      if (error) throw error
+
+      return NextResponse.json({ success: true, data: { updated: count || 0 } })
+    }
+
+    // 单篇更新
     const { data, error } = await client
       .from('articles')
       .update({ is_read: body.isRead, updated_at: new Date().toISOString() })
