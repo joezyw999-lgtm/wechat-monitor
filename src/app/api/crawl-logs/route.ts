@@ -15,9 +15,9 @@ export async function GET(request: NextRequest) {
     const from = (page - 1) * pageSize
     const to = from + pageSize - 1
 
-    const { data, error, count } = await client
+    const { data, error } = await client
       .from('crawl_logs')
-      .select('*', { count: 'exact' })
+      .select('*')
       .order('started_at', { ascending: false })
       .range(from, to)
 
@@ -27,9 +27,10 @@ export async function GET(request: NextRequest) {
       success: true,
       data: {
         list: data || [],
-        total: count || 0,
+        total: null,
         page,
-        pageSize
+        pageSize,
+        hasMore: (data?.length || 0) >= pageSize,
       }
     })
   } catch (error: any) {

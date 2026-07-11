@@ -32,13 +32,9 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const [username, setUsername] = useState('')
-  const [transitioning, setTransitioning] = useState(false)
-
   const handleNavigate = useCallback((key: string) => {
     if (key === pathname) return
-    setTransitioning(true)
     router.push(key)
-    setTimeout(() => setTransitioning(false), 300)
   }, [pathname, router])
 
   const handleLogout = useCallback(() => {
@@ -103,24 +99,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           position: 'relative',
           overflow: 'hidden',
         }}>
-          {transitioning && (
-            <div style={{ 
-              position: 'absolute', 
-              top: 0, 
-              left: 0, 
-              right: 0, 
-              height: 3, 
-              background: 'linear-gradient(90deg, #1890ff, #52c41a)',
-              animation: 'progress 0.3s ease-in-out',
-              zIndex: 100,
-            }} />
-          )}
-          <div style={{ 
-            opacity: transitioning ? 0.5 : 1,
-            transition: 'opacity 0.15s ease-in-out',
-          }}>
-            {children}
-          </div>
+          <div>{children}</div>
         </Content>
       </Layout>
       <style jsx global>{`

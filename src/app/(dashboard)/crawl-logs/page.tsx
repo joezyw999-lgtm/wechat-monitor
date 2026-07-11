@@ -8,7 +8,7 @@ import dayjs from 'dayjs'
 export default function CrawlLogsPage() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-  const [total, setTotal] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
 
@@ -19,7 +19,7 @@ export default function CrawlLogsPage() {
       const result = await res.json()
       if (result.success) {
         setData(result.data.list)
-        setTotal(result.data.total)
+        setHasMore(result.data.hasMore)
       }
     } catch (error) { console.error(error) }
     finally { setLoading(false) }
@@ -56,9 +56,9 @@ export default function CrawlLogsPage() {
         pagination={{ 
           current: page, 
           pageSize, 
-          total, 
+          total: hasMore ? page * pageSize + pageSize : data.length + (page - 1) * pageSize,
           showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 条`,
+          showTotal: () => hasMore ? `已加载 ${page * pageSize} 条，继续翻页查看更多` : `共 ${data.length + (page - 1) * pageSize} 条`,
           onChange: (p, ps) => { setPage(p); setPageSize(ps) } 
         }} 
       />
