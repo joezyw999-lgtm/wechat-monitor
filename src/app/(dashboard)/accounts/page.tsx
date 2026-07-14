@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Tag, Upload, Progress } from 'antd'
-import { PlusOutlined, SyncOutlined, ReloadOutlined, UploadOutlined, FileTextOutlined } from '@ant-design/icons'
+import { PlusOutlined, SyncOutlined, ReloadOutlined, UploadOutlined, FileTextOutlined, SearchOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useCache } from '@/lib/cache'
 import type { UploadProps } from 'antd'
@@ -26,34 +26,66 @@ export default function AccountsPage() {
   const [crawlLoading, setCrawlLoading] = useState<string | null>(null)
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [filters, setFilters] = useState({ keyword: '', category: '', status: '' })
   const [importModalOpen, setImportModalOpen] = useState(false)
   const [importResult, setImportResult] = useState<any>(null)
   const [importing, setImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cache = useCache()
 
+  const cacheKey = `accounts-list-${page}-${pageSize}-${JSON.stringify(filters)}`
+
   const fetchData = useCallback(async () => {
-    const cached = cache.get('accounts-list')
+    const cached = cache.get(cacheKey)
     if (cached) {
-      setData(cached)
+      setData(cached.list || [])
+      setTotal(cached.total || 0)
       return
     }
     setLoading(true)
     try {
-      const res = await fetch('/api/accounts')
+      const params = new URLSearchParams()
+      params.set('page', page.toString())
+      params.set('pageSize', pageSize.toString())
+      if (filters.keyword) params.set('keyword', filters.keyword)
+      if (filters.category) params.set('category', filters.category)
+      if (filters.status) params.set('status', filters.status)
+
+      const res = await fetch(`/api/accounts?${params.toString()}`)
       const result = await res.json()
       if (result.success) {
-        setData(result.data)
-        cache.set('accounts-list', result.data)
+        setData(result.data.list || [])
+        if (result.data.total !== null && result.data.total !== undefined) {
+          setTotal(result.data.total)
+        }
+        cache.set(cacheKey, result.data)
       } else {
         message.error(result.message || '获取公众号列表失败')
       }
     } catch (error: any) {
       message.error(error.message || '获取公众号列表失败')
     } finally { setLoading(false) }
-  }, [cache])
+  }, [cache, cacheKey, page, pageSize, filters])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  const handleFilterChange = useCallback((key: string, value: string) => {
+    setFilters(prev => ({ ...prev, [key]: value }))
+    setPage(1)
+  }, [])
+
+  const handleSearch = useCallback(() => {
+    setPage(1)
+    setTimeout(() => fetchData(), 0)
+  }, [fetchData])
+
+  const handleRefresh = useCallback(() => {
+    cache.invalidate(cacheKey)
+    fetchData()
+  }, [cache, cacheKey, fetchData])
 
   const handleSave = useCallback(async () => {
     try {
@@ -70,7 +102,7 @@ export default function AccountsPage() {
         setModalOpen(false)
         form.resetFields()
         setEditingRecord(null)
-        cache.invalidate('accounts-list')
+        cache.invalidate(cacheKey)
         cache.invalidate('dashboard-stats')
         fetchData()
       } else {
@@ -85,7 +117,7 @@ export default function AccountsPage() {
       const result = await res.json()
       if (result.success) { 
         message.success('删除成功')
-        cache.invalidate('accounts-list')
+        cache.invalidate(cacheKey)
         cache.invalidate('dashboard-stats')
         fetchData()
       } else {
@@ -131,7 +163,7 @@ export default function AccountsPage() {
       if (result.success) {
         setImportResult(result.data)
         message.success(result.message || '导入完成')
-        cache.invalidate('accounts-list')
+        cache.invalidate(cacheKey)
         cache.invalidate('dashboard-stats')
         await fetchData()
       } else {
@@ -183,19 +215,54 @@ export default function AccountsPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <Space wrap>
+          <Input
+            placeholder="搜索名称/原始ID"
+            prefix={<SearchOutlined />}
+            value={filters.keyword}
+            onChange={e => setFilters(prev => ({ ...prev, keyword: e.target.value }))}
+            style={{ width: 200 }}
+            onPressEnter={handleSearch}
+            allowClear
+          />
+          <Select
+            placeholder="分类"
+            style={{ width: 120 }}
+            allowClear
+            value={filters.category || undefined}
+            onChange={v => handleFilterChange('category', v || '')}
+            options={CATEGORY_OPTIONS}
+          />
+          <Select
+            placeholder="状态"
+            style={{ width: 120 }}
+            allowClear
+            value={filters.status || undefined}
+            onChange={v => handleFilterChange('status', v || '')}
+            options={[{ value: 'active', label: '启用' }, { value: 'inactive', label: '停用' }]}
+          />
+          <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>搜索</Button>
+        </Space>
         <Space>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingRecord(null); form.resetFields(); setModalOpen(true) }}>新增公众号</Button>
           <Button icon={<UploadOutlined />} onClick={() => { setImportModalOpen(true); setImportResult(null) }}>批量导入</Button>
+          <Button icon={<ReloadOutlined />} onClick={handleRefresh}>刷新</Button>
         </Space>
-        <Button icon={<ReloadOutlined />} onClick={() => fetchData()}>刷新</Button>
       </div>
       <Table
         columns={columns}
         dataSource={data || []}
         rowKey="id"
         loading={loading}
-        pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, ps) => { setPage(p); setPageSize(ps) }
+        }}
         size="middle"
       />
       <Modal
