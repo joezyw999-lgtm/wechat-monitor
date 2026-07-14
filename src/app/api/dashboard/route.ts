@@ -20,39 +20,52 @@ export async function GET(request: NextRequest) {
 
     const client = getSupabaseServiceClient() as any
 
-    // Run database queries in parallel
-    const [
-      { count: accountCount, error: accError },
-      { count: unreadCount, error: unreadError },
-      { count: todayCount, error: todayError },
-      { data: logs, error: logError },
-      { data: settings, error: settingsError },
-    ] = await Promise.all([
-      // Active accounts count
+    // 今天 0 点时间戳
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+
+    // 并发查询
+    const promises = [
+      // 监控公众号数
       client
         .from('accounts')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'active'),
 
-      // Unread articles count
+      // 未读文章数
       client
         .from('articles')
         .select('*', { count: 'exact', head: true })
         .eq('is_read', false),
 
-      // Recent crawl logs (last 5)
+      // 今日新增文章数
+      client
+        .from('articles')
+        .select('*', { count: 'exact', head: true })
+        .gte('created_at', todayStart.toISOString()),
+
+      // 最近采集日志
       client
         .from('crawl_logs')
         .select('id, status, started_at, finished_at, accounts_crawled, articles_found, articles_new, articles_matched, message')
         .order('started_at', { ascending: false })
         .limit(5),
 
-      // Get API key settings
+      // API Key 配置
       client
         .from('settings')
         .select('key, value')
         .in('key', ['oneapi_key', 'api_key']),
-    ])
+    ]
+
+    const results = await Promise.all(promises)
+    const [
+      { count: accountCount, error: accError },
+      { count: unreadCount, error: unreadError },
+      { count: todayCount, error: todayError },
+      { data: logs, error: logError },
+      { data: settings, error: settingsError },
+    ] = results
 
     if (accError) throw accError
     if (unreadError) throw unreadError
@@ -60,7 +73,7 @@ export async function GET(request: NextRequest) {
     if (logError) throw logError
     if (settingsError) throw settingsError
 
-    // Fetch balance (fail silently, don't block other data)
+    // 获取余额（失败不影响其他数据）
     let balance: number | null = null
     try {
       const apiKey = settings?.find((s: any) => s.key === 'oneapi_key')?.value
@@ -69,7 +82,7 @@ export async function GET(request: NextRequest) {
         balance = await fetchAccountBalance(apiKey)
       }
     } catch (e) {
-      // Balance fetch failed, ignore
+      // 获取余额失败，忽略
     }
 
     const result = {
