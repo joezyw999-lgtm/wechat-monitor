@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
 
     // 翻页时跳过 count，只有第一页或筛选变化时才统计总数
     const needCount = page === 1
-    const selectFields = 'id,title,account_name,published_at,is_read,created_at,matched_keywords,summary,original_url'
+    const selectFields = 'id,title,original_url,published_at,is_read,created_at,matched_keywords,summary,account_id,accounts(name)'
 
     let query = client
       .from('articles')
@@ -50,10 +50,16 @@ export async function GET(request: NextRequest) {
     const { data, error, count } = await query
     if (error) throw error
 
+    // 展平 account_name
+    const list = (data || []).map((item: any) => ({
+      ...item,
+      account_name: item.accounts?.name || '',
+    }))
+
     return NextResponse.json({
       success: true,
       data: {
-        list: data || [],
+        list,
         total: count ?? null,
         page,
         pageSize
