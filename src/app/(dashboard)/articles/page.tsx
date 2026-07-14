@@ -169,8 +169,8 @@ export default function ArticlesPage() {
     if (filters.accountId) params.set('accountId', filters.accountId)
     if (filters.category) params.set('category', filters.category)
     if (filters.isRead) params.set('isRead', filters.isRead)
-    if (filters.startDate) params.set('startDate', filters.startDate.format('YYYY-MM-DD'))
-    if (filters.endDate) params.set('endDate', filters.endDate.format('YYYY-MM-DD'))
+    if (filters.startDate) params.set('startDate', filters.startDate as string)
+    if (filters.endDate) params.set('endDate', filters.endDate as string)
 
     try {
       const res = await fetch(`/api/articles/export?${params.toString()}`)
