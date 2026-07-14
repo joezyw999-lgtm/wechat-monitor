@@ -3,17 +3,28 @@ import { getSupabaseServiceClient } from '@/lib/supabase'
 import { requireAuth } from '@/lib/auth'
 import { fetchAccountBalance } from '@/lib/api-client'
 
+// 服务端短缓存，避免重复全量统计
+let cacheData: any = null
+let cacheTime = 0
+const CACHE_TTL = 30 * 1000 // 30 秒
+
 export async function GET(request: NextRequest) {
   const session = await requireAuth(request)
   if (session instanceof Response) return session
 
   try {
+    const now = Date.now()
+    if (cacheData && now - cacheTime < CACHE_TTL) {
+      return NextResponse.json({ success: true, data: cacheData })
+    }
+
     const client = getSupabaseServiceClient() as any
 
     // Run database queries in parallel
     const [
       { count: accountCount, error: accError },
       { count: unreadCount, error: unreadError },
+      { count: todayCount, error: todayError },
       { data: logs, error: logError },
       { data: settings, error: settingsError },
     ] = await Promise.all([
@@ -45,17 +56,9 @@ export async function GET(request: NextRequest) {
 
     if (accError) throw accError
     if (unreadError) throw unreadError
+    if (todayError) throw todayError
     if (logError) throw logError
     if (settingsError) throw settingsError
-
-    // Today's article count
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const { count: todayCount, error: todayError } = await client
-      .from('articles')
-      .select('*', { count: 'exact', head: true })
-      .gte('created_at', today.toISOString())
-    if (todayError) throw todayError
 
     // Fetch balance (fail silently, don't block other data)
     let balance: number | null = null
@@ -69,16 +72,18 @@ export async function GET(request: NextRequest) {
       // Balance fetch failed, ignore
     }
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        accountCount: accountCount || 0,
-        todayArticleCount: todayCount || 0,
-        unreadCount: unreadCount || 0,
-        balance,
-        recentLogs: logs || []
-      }
-    })
+    const result = {
+      accountCount: accountCount || 0,
+      todayArticleCount: todayCount || 0,
+      unreadCount: unreadCount || 0,
+      balance,
+      recentLogs: logs || []
+    }
+
+    cacheData = result
+    cacheTime = Date.now()
+
+    return NextResponse.json({ success: true, data: result })
   } catch (error: any) {
     return NextResponse.json({ success: false, message: error.message }, { status: 500 })
   }

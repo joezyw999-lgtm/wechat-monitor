@@ -19,7 +19,17 @@ export default function ArticlesPage() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const cache = useCache()
 
+  const cacheKey = `articles-${page}-${pageSize}-${JSON.stringify(filters)}`
+
   const fetchData = useCallback(async () => {
+    const cached = cache.get(cacheKey)
+    if (cached) {
+      setData(cached.list || [])
+      setTotal(cached.total || 0)
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     try {
       const params = new URLSearchParams()
@@ -35,16 +45,21 @@ export default function ArticlesPage() {
       const result = await res.json()
       if (result.success) {
         setData(result.data.list)
-        setTotal(result.data.total)
+        setTotal(result.data.total ?? 0)
+        cache.set(cacheKey, result.data)
+      } else {
+        message.error(result.message || '获取文章列表失败')
       }
-    } catch (error) { console.error(error) }
+    } catch (error: any) {
+      message.error(error.message || '获取文章列表失败')
+    }
     finally { setLoading(false) }
-  }, [page, pageSize, filters])
+  }, [cache, cacheKey])
 
   const handleSearch = useCallback(() => {
     setPage(1)
     setSelectedRowKeys([])
-    fetchData()
+    setTimeout(() => fetchData(), 0)
   }, [fetchData])
 
   const handleDateChange = useCallback((dates: any) => {

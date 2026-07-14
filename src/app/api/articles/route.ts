@@ -17,9 +17,14 @@ export async function GET(request: NextRequest) {
     const isRead = searchParams.get('isRead')
 
     const client = getSupabaseServiceClient()
+
+    // 翻页时跳过 count，只有第一页或筛选变化时才统计总数
+    const needCount = page === 1
+    const selectFields = 'id,title,account_name,published_at,is_read,created_at,matched_keywords,summary,original_url'
+
     let query = client
       .from('articles')
-      .select('*', { count: 'exact' })
+      .select(selectFields, needCount ? { count: 'exact' } : undefined)
       .order('published_at', { ascending: false })
 
     if (keyword) {
@@ -49,7 +54,7 @@ export async function GET(request: NextRequest) {
       success: true,
       data: {
         list: data || [],
-        total: count || 0,
+        total: count ?? null,
         page,
         pageSize
       }

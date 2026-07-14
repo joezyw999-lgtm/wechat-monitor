@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { Table, Tag, Button, Space, message } from 'antd'
+import { Table, Tag, Button, message } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import { useCache } from '@/lib/cache'
 
 export default function CrawlLogsPage() {
   const [data, setData] = useState<any[]>([])
@@ -11,8 +12,18 @@ export default function CrawlLogsPage() {
   const [hasMore, setHasMore] = useState(true)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  const cache = useCache()
+  const cacheKey = `crawl-logs-${page}-${pageSize}`
 
   const fetchData = useCallback(async () => {
+    const cached = cache.get(cacheKey)
+    if (cached) {
+      setData(cached.list || [])
+      setHasMore(cached.hasMore ?? true)
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     try {
       const res = await fetch(`/api/crawl-logs?page=${page}&pageSize=${pageSize}`)
@@ -20,6 +31,7 @@ export default function CrawlLogsPage() {
       if (result.success) {
         setData(result.data.list)
         setHasMore(result.data.hasMore)
+        cache.set(cacheKey, result.data)
       } else {
         message.error(result.message || '获取采集日志失败')
       }
@@ -27,7 +39,12 @@ export default function CrawlLogsPage() {
       message.error(error?.message || '获取采集日志失败')
     }
     finally { setLoading(false) }
-  }, [page, pageSize])
+  }, [cache, cacheKey])
+
+  const handleRefresh = useCallback(() => {
+    cache.invalidate(cacheKey)
+    fetchData()
+  }, [cache, cacheKey, fetchData])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -49,7 +66,7 @@ export default function CrawlLogsPage() {
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
-        <Button icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>
+        <Button icon={<ReloadOutlined />} onClick={handleRefresh}>刷新</Button>
       </div>
       <Table 
         columns={columns} 
