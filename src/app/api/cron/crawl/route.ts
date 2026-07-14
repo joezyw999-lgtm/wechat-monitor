@@ -50,10 +50,14 @@ export async function GET() {
       .single()
 
     let totalFound = 0
+    let totalSkippedOld = 0
     let totalNew = 0
     let totalMatched = 0
     let totalFailed = 0
     const errors: string[] = []
+
+    // 4-day cutoff for article freshness
+    const cutoffTime = Date.now() - 4 * 24 * 60 * 60 * 1000
 
     // Collect all articles from all accounts first
     const allArticles: Array<{
@@ -77,6 +81,20 @@ export async function GET() {
       totalFound += result.articles.length
 
       for (const article of result.articles) {
+        // Skip articles without publish time
+        if (!article.published_at) {
+          console.log(`[Crawl] Skipping (no publish time): ${article.title}`)
+          continue
+        }
+
+        // Skip articles older than 4 days
+        const pubTime = new Date(article.published_at).getTime()
+        if (isNaN(pubTime) || pubTime < cutoffTime) {
+          console.log(`[Crawl] Skipping (too old): ${article.title}`)
+          totalSkippedOld++
+          continue
+        }
+
         // Match keywords first - only save articles that match at least one keyword
         const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
         
@@ -154,7 +172,7 @@ export async function GET() {
         status: totalFailed > 0 || errors.length > 0 ? 'partial' : 'success',
         message: errors.length > 0 ? errors.join('; ') : null,
         accounts_crawled: accounts.length,
-        articles_found: totalFound,
+        articles_found: totalMatched,
         articles_new: totalNew,
         articles_matched: totalMatched,
         finished_at: new Date().toISOString(),

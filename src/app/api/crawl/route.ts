@@ -59,6 +59,7 @@ export async function POST(request: NextRequest) {
     if (logError) throw logError
 
     let totalFound = 0
+    let totalSkippedOld = 0
     let totalNew = 0
     let totalMatched = 0
     let totalFailed = 0
@@ -85,7 +86,21 @@ export async function POST(request: NextRequest) {
       console.log(`[Crawl] Account ${account.name} (${account.wx_id}): API returned ${result.articles.length} articles`)
       totalFound += result.articles.length
 
-      for (const article of result.articles) {
+      // Filter by publish time - only keep articles from the last 4 days
+      const now = Date.now()
+      const FOUR_DAYS_MS = 4 * 24 * 60 * 60 * 1000
+      const cutoffTime = now - FOUR_DAYS_MS
+
+      const recentArticles = result.articles.filter((article: any) => {
+        const pubTime = article.published_at || article.publish_time
+        if (!pubTime) return false
+        const timestamp = new Date(pubTime).getTime()
+        return !isNaN(timestamp) && timestamp >= cutoffTime
+      })
+
+      totalSkippedOld += result.articles.length - recentArticles.length
+
+      for (const article of recentArticles) {
         // Match keywords first - only save articles that match at least one keyword
         const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
         
@@ -175,7 +190,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `采集完成: 发现 ${totalFound} 篇, 新增 ${totalNew} 篇, 命中关键词 ${totalMatched} 篇`,
+      message: `采集完成: 发现 ${totalFound} 篇, 4天内 ${totalFound - totalSkippedOld} 篇, 命中 ${totalMatched} 篇, 新增 ${totalNew} 篇`,
       data: {
         accounts_crawled: accounts.length,
         articles_found: totalFound,
