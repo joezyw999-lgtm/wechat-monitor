@@ -21,7 +21,9 @@ export async function GET(request: NextRequest) {
 
     // 翻页时跳过 count，只有第一页或筛选变化时才统计总数
     const needCount = page === 1
-    const selectFields = 'id,title,original_url,published_at,is_read,created_at,matched_keywords,summary,account_id,accounts(name,category)'
+    // 有分类筛选时用 inner join，避免无关联账号的脏数据影响
+    const accountSelect = category ? 'accounts!inner(name,category)' : 'accounts(name,category)'
+    const selectFields = `id,title,original_url,published_at,is_read,created_at,matched_keywords,summary,account_id,${accountSelect}`
 
     let query = client
       .from('articles')
@@ -54,10 +56,11 @@ export async function GET(request: NextRequest) {
     const { data, error, count } = await query
     if (error) throw error
 
-    // 展平 account_name
+    // 展平 account_name 和 category
     const list = (data || []).map((item: any) => ({
       ...item,
       account_name: item.accounts?.name || '',
+      category: item.accounts?.category || '',
     }))
 
     return NextResponse.json({

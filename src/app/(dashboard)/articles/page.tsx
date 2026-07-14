@@ -47,7 +47,10 @@ export default function ArticlesPage() {
       const result = await res.json()
       if (result.success) {
         setData(result.data.list)
-        setTotal(result.data.total ?? 0)
+        // 只有接口返回有效总数时才更新，避免翻页时被清零
+        if (result.data.total !== null && result.data.total !== undefined) {
+          setTotal(result.data.total)
+        }
         cache.set(cacheKey, result.data)
       } else {
         message.error(result.message || '获取文章列表失败')
@@ -160,8 +163,14 @@ export default function ArticlesPage() {
 
   useEffect(() => {
     fetchData()
-    fetch('/api/accounts').then(r => r.json()).then(r => r.success && setAccounts(r.data))
-  }, [page, pageSize, filters])
+  }, [fetchData])
+
+  // 公众号列表只加载一次
+  useEffect(() => {
+    fetch('/api/accounts').then(r => r.json()).then(r => {
+      if (r.success) setAccounts(r.data)
+    }).catch(() => {})
+  }, [])
 
   const handleExport = useCallback(async () => {
     const params = new URLSearchParams()
