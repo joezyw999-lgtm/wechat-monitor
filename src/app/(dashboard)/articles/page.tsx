@@ -161,7 +161,7 @@ export default function ArticlesPage() {
   useEffect(() => {
     fetchData()
     fetch('/api/accounts').then(r => r.json()).then(r => r.success && setAccounts(r.data))
-  }, [])
+  }, [page, pageSize, filters])
 
   const handleExport = useCallback(async () => {
     const params = new URLSearchParams()
