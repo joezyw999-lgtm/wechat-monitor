@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { Table, Button, Input, DatePicker, Select, Space, Tag, message, Modal, Popconfirm } from 'antd'
-import { SearchOutlined, ReloadOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons'
+import { SearchOutlined, ReloadOutlined, DeleteOutlined, CheckCircleOutlined, DownloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useCache } from '@/lib/cache'
 
@@ -14,8 +14,9 @@ export default function ArticlesPage() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const [filters, setFilters] = useState({ keyword: '', accountId: '', isRead: '', startDate: '', endDate: '' })
+  const [filters, setFilters] = useState({ keyword: '', accountId: '', category: '', isRead: '', startDate: '', endDate: '' })
   const [accounts, setAccounts] = useState<any[]>([])
+  const [categories] = useState(['官方', '高校', '竞对'])
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const cache = useCache()
 
@@ -37,6 +38,7 @@ export default function ArticlesPage() {
       params.set('pageSize', pageSize.toString())
       if (filters.keyword) params.set('keyword', filters.keyword)
       if (filters.accountId) params.set('accountId', filters.accountId)
+      if (filters.category) params.set('category', filters.category)
       if (filters.isRead) params.set('isRead', filters.isRead)
       if (filters.startDate) params.set('startDate', filters.startDate)
       if (filters.endDate) params.set('endDate', filters.endDate)
@@ -161,9 +163,44 @@ export default function ArticlesPage() {
     fetch('/api/accounts').then(r => r.json()).then(r => r.success && setAccounts(r.data))
   }, [])
 
+  const handleExport = useCallback(async () => {
+    const params = new URLSearchParams()
+    if (filters.keyword) params.set('keyword', filters.keyword)
+    if (filters.accountId) params.set('accountId', filters.accountId)
+    if (filters.category) params.set('category', filters.category)
+    if (filters.isRead) params.set('isRead', filters.isRead)
+    if (filters.startDate) params.set('startDate', filters.startDate.format('YYYY-MM-DD'))
+    if (filters.endDate) params.set('endDate', filters.endDate.format('YYYY-MM-DD'))
+
+    try {
+      const res = await fetch(`/api/articles/export?${params.toString()}`)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        message.error(err.message || '导出失败')
+        return
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `文章列表_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+      message.success('导出成功')
+    } catch (error: any) {
+      message.error(error.message || '导出失败')
+    }
+  }, [filters])
+
   const columns = [
     { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true, render: (v: string, r: any) => <a href={r.original_url || r.url} target="_blank" rel="noopener noreferrer" onClick={() => handleMarkRead(r.id, true)} style={{ fontWeight: r.is_read ? 'normal' : 500 }}>{v}</a> },
     { title: '公众号', dataIndex: 'account_name', key: 'account_name', width: 120, ellipsis: true },
+    { title: '分类', dataIndex: 'category', key: 'category', width: 80, render: (v: string) => {
+      const colorMap: Record<string, string> = { '官方': 'blue', '高校': 'green', '竞对': 'orange' }
+      return v ? <Tag color={colorMap[v] || 'default'}>{v}</Tag> : '-'
+    }},
     { title: '匹配关键词', dataIndex: 'matched_keywords', key: 'matched_keywords', width: 150, render: (v: string | string[]) => {
       if (!v) return '-'
       const keywords = typeof v === 'string' ? v.split(',') : v
@@ -194,6 +231,17 @@ export default function ArticlesPage() {
           onChange={v => handleFilterChange('accountId', v || '')}
           options={accounts.map((a: any) => ({ value: a.id, label: a.name }))}
         />
+        <Select 
+          placeholder="分类" 
+          style={{ width: 120 }} 
+          allowClear 
+          onChange={v => handleFilterChange('category', v || '')}
+          options={[
+            { value: '官方', label: '官方' },
+            { value: '高校', label: '高校' },
+            { value: '竞对', label: '竞对' },
+          ]}
+        />
         <RangePicker 
           onChange={handleDateChange}
         />
@@ -206,6 +254,7 @@ export default function ArticlesPage() {
         />
         <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>搜索</Button>
         <Button icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>
+        <Button icon={<DownloadOutlined />} onClick={handleExport}>导出Excel</Button>
         <Popconfirm
           title="确认全部标记已读"
           description="将当前筛选条件下的所有文章标记为已读，确定要继续吗？"

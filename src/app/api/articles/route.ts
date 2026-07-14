@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20')
     const keyword = searchParams.get('keyword')
     const accountId = searchParams.get('accountId')
+    const category = searchParams.get('category')
     const startDate = searchParams.get('startDate')
     const endDate = searchParams.get('endDate')
     const isRead = searchParams.get('isRead')
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
 
     // 翻页时跳过 count，只有第一页或筛选变化时才统计总数
     const needCount = page === 1
-    const selectFields = 'id,title,original_url,published_at,is_read,created_at,matched_keywords,summary,account_id,accounts(name)'
+    const selectFields = 'id,title,original_url,published_at,is_read,created_at,matched_keywords,summary,account_id,accounts(name,category)'
 
     let query = client
       .from('articles')
@@ -32,6 +33,9 @@ export async function GET(request: NextRequest) {
     }
     if (accountId) {
       query = query.eq('account_id', accountId)
+    }
+    if (category) {
+      query = query.eq('accounts.category', category)
     }
     if (startDate) {
       query = query.gte('published_at', startDate)
