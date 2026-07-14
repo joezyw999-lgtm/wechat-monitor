@@ -70,8 +70,9 @@ export default function AccountsPage() {
         setModalOpen(false)
         form.resetFields()
         setEditingRecord(null)
-        fetchData()
+        cache.invalidate('accounts-list')
         cache.invalidate('dashboard-stats')
+        fetchData()
       } else {
         message.error(result.message)
       }
@@ -84,8 +85,9 @@ export default function AccountsPage() {
       const result = await res.json()
       if (result.success) { 
         message.success('删除成功')
-        fetchData()
+        cache.invalidate('accounts-list')
         cache.invalidate('dashboard-stats')
+        fetchData()
       } else {
         message.error(result.message)
       }
