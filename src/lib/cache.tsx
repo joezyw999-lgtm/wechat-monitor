@@ -57,12 +57,13 @@ export function useCache() {
 }
 
 // Hook for data fetching with caching
+// 支持 SWR (stale-while-revalidate)：有缓存时先展示缓存，后台再静默刷新
 export function useCachedFetch(
   key: string,
   fetcher: () => Promise<any>,
-  options: { maxAge?: number; enabled?: boolean } = {}
+  options: { maxAge?: number; enabled?: boolean; swr?: boolean } = {}
 ) {
-  const { maxAge = DEFAULT_MAX_AGE, enabled = true } = options
+  const { maxAge = DEFAULT_MAX_AGE, enabled = true, swr = true } = options
   const cache = useCache()
   const [data, setData] = useState<any>(() => {
     if (!enabled) return null
@@ -80,9 +81,22 @@ export function useCachedFetch(
   const fetchData = useCallback(async (forceRefresh = false) => {
     if (!enabled) return
     const cached = cache.get(key, maxAge)
+
+    // SWR 模式：有缓存先展示，然后后台刷新
     if (cached && !forceRefresh) {
       setData(cached)
       setLoading(false)
+      if (swr) {
+        // 后台静默刷新，不改变 loading 状态
+        fetcherRef.current()
+          .then((result: any) => {
+            cache.set(key, result)
+            setData(result)
+          })
+          .catch(() => {
+            // 静默刷新失败不影响已有缓存
+          })
+      }
       return cached
     }
 
@@ -99,16 +113,26 @@ export function useCachedFetch(
     } finally {
       setLoading(false)
     }
-  }, [key, maxAge, enabled, cache])
+  }, [key, maxAge, enabled, cache, swr])
 
   const refresh = useCallback(() => fetchData(true), [fetchData])
 
-  // Auto-fetch on mount if no cached data, only depend on key and enabled
+  // Auto-fetch on mount: 有缓存也触发一次（SWR 模式下走后台刷新）
   useEffect(() => {
-    if (enabled && !data) {
+    if (!enabled) return
+    if (!data) {
       fetchData()
+    } else if (swr) {
+      // 已挂载时有缓存，也做一次后台刷新
+      fetcherRef.current()
+        .then((result: any) => {
+          cache.set(key, result)
+          setData(result)
+        })
+        .catch(() => {})
     }
-  }, [enabled, fetchData])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, key])
 
-  return { data, loading, error, refresh }
+  return { data, loading, error, refresh, fetchData }
 }

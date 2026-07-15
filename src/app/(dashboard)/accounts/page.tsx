@@ -38,25 +38,43 @@ export default function AccountsPage() {
 
   const cacheKey = `accounts-list-${page}-${pageSize}-${JSON.stringify(filters)}`
 
+  // 构建请求参数
+  const buildParams = useCallback(() => {
+    const params = new URLSearchParams()
+    params.set('page', page.toString())
+    params.set('pageSize', pageSize.toString())
+    if (filters.keyword) params.set('keyword', filters.keyword)
+    if (filters.category) params.set('category', filters.category)
+    if (filters.status) params.set('status', filters.status)
+    return params.toString()
+  }, [page, pageSize, filters])
+
   const fetchData = useCallback(async () => {
     const cached = cache.get(cacheKey)
+    // SWR：有缓存先展示，后台再静默刷新
     if (cached) {
       setData(cached.list || [])
       if (cached.total !== null && cached.total !== undefined) {
         setTotal(cached.total)
       }
+      // 后台静默刷新
+      fetch(`/api/accounts?${buildParams()}`)
+        .then(r => r.json())
+        .then(result => {
+          if (result.success) {
+            setData(result.data.list || [])
+            if (result.data.total !== null && result.data.total !== undefined) {
+              setTotal(result.data.total)
+            }
+            cache.set(cacheKey, result.data)
+          }
+        })
+        .catch(() => {})
       return
     }
     setLoading(true)
     try {
-      const params = new URLSearchParams()
-      params.set('page', page.toString())
-      params.set('pageSize', pageSize.toString())
-      if (filters.keyword) params.set('keyword', filters.keyword)
-      if (filters.category) params.set('category', filters.category)
-      if (filters.status) params.set('status', filters.status)
-
-      const res = await fetch(`/api/accounts?${params.toString()}`)
+      const res = await fetch(`/api/accounts?${buildParams()}`)
       const result = await res.json()
       if (result.success) {
         setData(result.data.list || [])
@@ -70,7 +88,7 @@ export default function AccountsPage() {
     } catch (error: any) {
       message.error(error.message || '获取公众号列表失败')
     } finally { setLoading(false) }
-  }, [cache, cacheKey, page, pageSize, filters])
+  }, [cache, cacheKey, buildParams])
 
   useEffect(() => { fetchData() }, [fetchData])
 

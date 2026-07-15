@@ -22,35 +22,50 @@ export default function ArticlesPage() {
 
   const cacheKey = `articles-${page}-${pageSize}-${JSON.stringify(filters)}`
 
+  // 构建请求参数
+  const buildParams = useCallback(() => {
+    const params = new URLSearchParams()
+    params.set('page', page.toString())
+    params.set('pageSize', pageSize.toString())
+    if (filters.keyword) params.set('keyword', filters.keyword)
+    if (filters.accountId) params.set('accountId', filters.accountId)
+    if (filters.category) params.set('category', filters.category)
+    if (filters.isRead) params.set('isRead', filters.isRead)
+    if (filters.startDate) params.set('startDate', filters.startDate)
+    if (filters.endDate) params.set('endDate', filters.endDate)
+    return params.toString()
+  }, [page, pageSize, filters])
+
   const fetchData = useCallback(async () => {
     const cached = cache.get(cacheKey)
+    // SWR：有缓存先展示，后台再静默刷新
     if (cached) {
       setData(cached.list || [])
-      // 只有缓存里有有效 total 才更新，翻页缓存可能没有 total
       if (cached.total !== null && cached.total !== undefined) {
         setTotal(cached.total)
       }
-      setLoading(false)
+      // 后台静默刷新（不改变 loading 状态）
+      fetch(`/api/articles?${buildParams()}`)
+        .then(r => r.json())
+        .then(result => {
+          if (result.success) {
+            setData(result.data.list)
+            if (result.data.total !== null && result.data.total !== undefined) {
+              setTotal(result.data.total)
+            }
+            cache.set(cacheKey, result.data)
+          }
+        })
+        .catch(() => {})
       return
     }
 
     setLoading(true)
     try {
-      const params = new URLSearchParams()
-      params.set('page', page.toString())
-      params.set('pageSize', pageSize.toString())
-      if (filters.keyword) params.set('keyword', filters.keyword)
-      if (filters.accountId) params.set('accountId', filters.accountId)
-      if (filters.category) params.set('category', filters.category)
-      if (filters.isRead) params.set('isRead', filters.isRead)
-      if (filters.startDate) params.set('startDate', filters.startDate)
-      if (filters.endDate) params.set('endDate', filters.endDate)
-
-      const res = await fetch(`/api/articles?${params.toString()}`)
+      const res = await fetch(`/api/articles?${buildParams()}`)
       const result = await res.json()
       if (result.success) {
         setData(result.data.list)
-        // 只有接口返回有效总数时才更新，避免翻页时被清零
         if (result.data.total !== null && result.data.total !== undefined) {
           setTotal(result.data.total)
         }
@@ -62,7 +77,7 @@ export default function ArticlesPage() {
       message.error(error.message || '获取文章列表失败')
     }
     finally { setLoading(false) }
-  }, [cache, cacheKey])
+  }, [cache, cacheKey, buildParams])
 
   const handleSearch = useCallback(() => {
     setPage(1)
