@@ -42,7 +42,9 @@ export default function AccountsPage() {
     const cached = cache.get(cacheKey)
     if (cached) {
       setData(cached.list || [])
-      setTotal(cached.total || 0)
+      if (cached.total !== null && cached.total !== undefined) {
+        setTotal(cached.total)
+      }
       return
     }
     setLoading(true)

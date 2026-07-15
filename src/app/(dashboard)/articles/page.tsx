@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { Table, Button, Input, DatePicker, Select, Space, Tag, message, Modal, Popconfirm } from 'antd'
 import { SearchOutlined, ReloadOutlined, DeleteOutlined, CheckCircleOutlined, DownloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -26,7 +26,10 @@ export default function ArticlesPage() {
     const cached = cache.get(cacheKey)
     if (cached) {
       setData(cached.list || [])
-      setTotal(cached.total || 0)
+      // 只有缓存里有有效 total 才更新，翻页缓存可能没有 total
+      if (cached.total !== null && cached.total !== undefined) {
+        setTotal(cached.total)
+      }
       setLoading(false)
       return
     }
@@ -203,7 +206,7 @@ export default function ArticlesPage() {
     }
   }, [filters])
 
-  const columns = [
+  const columns = useMemo(() => [
     { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true, render: (v: string, r: any) => <a href={r.original_url || r.url} target="_blank" rel="noopener noreferrer" onClick={() => handleMarkRead(r.id, true)} style={{ fontWeight: r.is_read ? 'normal' : 500 }}>{v}</a> },
     { title: '公众号', dataIndex: 'account_name', key: 'account_name', width: 120, ellipsis: true },
     { title: '分类', dataIndex: 'category', key: 'category', width: 80, render: (v: string) => {
@@ -217,7 +220,16 @@ export default function ArticlesPage() {
     }},
     { title: '发布时间', dataIndex: 'published_at', key: 'published_at', width: 160, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-' },
     { title: '状态', dataIndex: 'is_read', key: 'is_read', width: 80, render: (v: boolean) => <Tag color={v ? 'default' : 'red'}>{v ? '已读' : '未读'}</Tag> }
-  ]
+  ], [handleMarkRead])
+
+  const pagination = useMemo(() => ({
+    current: page,
+    pageSize,
+    total,
+    showSizeChanger: true,
+    showTotal: (t: number) => `共 ${t} 条`,
+    onChange: (p: number, ps: number) => { setPage(p); setPageSize(ps); setSelectedRowKeys([]) }
+  }), [page, pageSize, total])
 
   return (
     <div>
@@ -291,14 +303,7 @@ export default function ArticlesPage() {
           selectedRowKeys,
           onChange: setSelectedRowKeys,
         }}
-        pagination={{ 
-          current: page, 
-          pageSize, 
-          total, 
-          showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 条`,
-          onChange: (p, ps) => { setPage(p); setPageSize(ps); setSelectedRowKeys([]) } 
-        }}
+        pagination={pagination}
         size="middle"
       />
     </div>
