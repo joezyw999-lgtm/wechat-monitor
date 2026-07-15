@@ -188,6 +188,16 @@ export async function POST(request: NextRequest) {
 
     if (updateLogError) throw updateLogError
 
+    // 清理超过4天的历史文章，确保数据库只保留近4天的数据
+    const cutoffDate = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString()
+    const { error: cleanupError } = await client
+      .from('articles')
+      .delete()
+      .lt('published_at', cutoffDate)
+    if (cleanupError) {
+      console.error('[Crawl] Cleanup old articles error:', cleanupError.message)
+    }
+
     return NextResponse.json({
       success: true,
       message: `采集完成: 发现 ${totalFound} 篇, 4天内 ${totalFound - totalSkippedOld} 篇, 命中 ${totalMatched} 篇, 新增 ${totalNew} 篇`,

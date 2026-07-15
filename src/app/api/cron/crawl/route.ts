@@ -181,6 +181,16 @@ export async function GET() {
 
     if (updateLogError) throw updateLogError
 
+    // 清理超过4天的历史文章
+    const cutoffDate = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString()
+    const { error: cleanupError } = await client
+      .from('articles')
+      .delete()
+      .lt('published_at', cutoffDate)
+    if (cleanupError) {
+      console.error('[Cron Crawl] Cleanup old articles error:', cleanupError.message)
+    }
+
     return NextResponse.json({ success: true, totalFound, totalNew, totalMatched, totalFailed })
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
