@@ -4,7 +4,15 @@ import { fetchAccountArticles, matchKeywords } from '@/lib/api-client'
 import { processArticleDedupFields } from '@/lib/recruit-dedup'
 
 // This route is called by Vercel Cron on a schedule
-export async function GET() {
+export async function GET(request: Request) {
+  // Verify CRON_SECRET header
+  const authHeader = request.headers.get('authorization')
+  const cronSecret = process.env.CRON_SECRET
+
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   try {
     const client = getSupabaseServiceClient() as any
 

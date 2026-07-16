@@ -7,7 +7,7 @@ const JWT_SECRET = new TextEncoder().encode(
 
 const SESSION_COOKIE = 'wechat_session'
 
-const PUBLIC_PATHS = ['/login', '/api/auth/login']
+const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/cron/crawl']
 
 function isPublicPath(path: string): boolean {
   return PUBLIC_PATHS.some(p => path === p || path.startsWith(p + '/'))
