@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase'
 import { fetchAccountArticles, matchKeywords } from '@/lib/api-client'
+import { processArticleDedupFields } from '@/lib/recruit-dedup'
 
 // This route is called by Vercel Cron on a schedule
 export async function GET() {
@@ -53,6 +54,7 @@ export async function GET() {
     let totalSkippedOld = 0
     let totalNew = 0
     let totalMatched = 0
+    let totalDedupSkipped = 0
     let totalFailed = 0
     const errors: string[] = []
 
@@ -64,6 +66,14 @@ export async function GET() {
       account: any
       article: any
       matchedKw: string[]
+      dedup: {
+        original_title: string
+        normalized_title: string
+        company_name: string
+        recruit_type: string
+        recruit_batch: string
+        duplicate_key: string | null
+      }
     }> = []
 
     // Crawl each account and collect articles
@@ -103,17 +113,31 @@ export async function GET() {
           continue
         }
 
-        allArticles.push({ account, article, matchedKw })
+        // 生成去重相关字段
+        const dedup = processArticleDedupFields({
+          title: article.title,
+          digest: article.digest,
+        })
+
+        allArticles.push({ account, article, matchedKw, dedup })
       }
     }
 
-    // Batch deduplication: get all existing URLs from database in one query
+    // Batch deduplication: check original_url, normalized_title, duplicate_key in bulk
     const allUrls = allArticles.map(a => a.article.url).filter(Boolean)
-    let existingUrls = new Set<string>()
+    const allNormalizedTitles = allArticles.map(a => a.dedup.normalized_title).filter(Boolean)
+    const allDuplicateKeys = allArticles
+      .map(a => a.dedup.duplicate_key)
+      .filter((k): k is string => !!k)
 
+    let existingUrls = new Set<string>()
+    let existingNormalizedTitles = new Set<string>()
+    let existingDuplicateKeys = new Set<string>()
+
+    const batchSize = 100
+
+    // 批量查已存在的 original_url
     if (allUrls.length > 0) {
-      // Query in batches of 100 to avoid URL length limits
-      const batchSize = 100
       for (let i = 0; i < allUrls.length; i += batchSize) {
         const batch = allUrls.slice(i, i + batchSize)
         const { data: existing } = await client
@@ -127,23 +151,66 @@ export async function GET() {
       }
     }
 
-    console.log(`[Crawl] Found ${existingUrls.size} existing URLs in database`)
+    // 批量查已存在的 normalized_title
+    if (allNormalizedTitles.length > 0) {
+      for (let i = 0; i < allNormalizedTitles.length; i += batchSize) {
+        const batch = allNormalizedTitles.slice(i, i + batchSize)
+        const { data: existing } = await client
+          .from('articles')
+          .select('normalized_title')
+          .in('normalized_title', batch)
 
-    // Filter out duplicates and prepare for batch insert
-    const newArticles = allArticles.filter(a => !existingUrls.has(a.article.url))
-    console.log(`[Crawl] ${newArticles.length} new articles to insert (after dedup)`)
+        if (existing) {
+          existing.forEach((e: any) => existingNormalizedTitles.add(e.normalized_title))
+        }
+      }
+    }
+
+    // 批量查已存在的 duplicate_key
+    if (allDuplicateKeys.length > 0) {
+      for (let i = 0; i < allDuplicateKeys.length; i += batchSize) {
+        const batch = allDuplicateKeys.slice(i, i + batchSize)
+        const { data: existing } = await client
+          .from('articles')
+          .select('duplicate_key')
+          .in('duplicate_key', batch)
+
+        if (existing) {
+          existing.forEach((e: any) => existingDuplicateKeys.add(e.duplicate_key))
+        }
+      }
+    }
+
+    console.log(`[Cron Crawl] Found ${existingUrls.size} existing URLs, ${existingNormalizedTitles.size} existing normalized titles, ${existingDuplicateKeys.size} existing duplicate keys`)
+
+    // Filter out duplicates: by URL, by normalized title, by duplicate_key
+    const newArticles = allArticles.filter(a => {
+      if (existingUrls.has(a.article.url)) return false
+      if (a.dedup.normalized_title && existingNormalizedTitles.has(a.dedup.normalized_title)) return false
+      if (a.dedup.duplicate_key && existingDuplicateKeys.has(a.dedup.duplicate_key)) return false
+      return true
+    })
+
+    totalDedupSkipped = allArticles.length - newArticles.length
+    console.log(`[Cron Crawl] ${newArticles.length} new articles to insert (after dedup), skipped ${totalDedupSkipped} by dedup`)
 
     // Batch insert new articles
     if (newArticles.length > 0) {
       const insertData = newArticles.map(a => ({
         account_id: a.account.id,
-        title: a.article.title,
+        title: a.dedup.normalized_title || a.article.title,
+        original_title: a.article.title,
+        normalized_title: a.dedup.normalized_title,
         original_url: a.article.url,
         summary: a.article.digest || null,
         content: a.article.content || null,
         published_at: a.article.published_at || new Date().toISOString(),
         unique_key: a.article.msg_id || null,
-        matched_keywords: a.matchedKw.join(',')
+        matched_keywords: a.matchedKw.join(','),
+        company_name: a.dedup.company_name || null,
+        recruit_type: a.dedup.recruit_type || null,
+        recruit_batch: a.dedup.recruit_batch || null,
+        duplicate_key: a.dedup.duplicate_key || null,
       }))
 
       // Insert in batches of 50
@@ -155,11 +222,16 @@ export async function GET() {
           .insert(batch)
 
         if (insertError) {
-          console.error(`[Crawl] Batch insert error:`, insertError.message)
+          console.error(`[Cron Crawl] Batch insert error:`, insertError.message)
           errors.push(`Batch insert error: ${insertError.message}`)
         } else {
           totalNew += batch.length
-          console.log(`[Crawl] Inserted batch of ${batch.length} articles`)
+          console.log(`[Cron Crawl] Inserted batch of ${batch.length} articles`)
+          batch.forEach(item => {
+            if (item.normalized_title) existingNormalizedTitles.add(item.normalized_title)
+            if (item.duplicate_key) existingDuplicateKeys.add(item.duplicate_key)
+            if (item.original_url) existingUrls.add(item.original_url)
+          })
         }
       }
 
