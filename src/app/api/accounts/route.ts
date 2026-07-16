@@ -63,6 +63,31 @@ export async function GET(request: NextRequest) {
       data = result.data
     }
 
+    // 批量补充每个公众号的最新文章日期
+    if (data && data.length > 0) {
+      const accountIds = data.map(a => a.id)
+      const { data: latestArticles, error: latestError } = await client
+        .from('articles')
+        .select('account_id, published_at')
+        .in('account_id', accountIds)
+        .order('published_at', { ascending: false })
+
+      if (!latestError && latestArticles) {
+        const latestMap = new Map<string, string>()
+        for (const art of latestArticles) {
+          if (!latestMap.has(art.account_id)) {
+            latestMap.set(art.account_id, art.published_at)
+          }
+        }
+        data = data.map(item => ({
+          ...item,
+          latest_article_published_at: latestMap.get(item.id) || null,
+        }))
+      } else {
+        data = data.map(item => ({ ...item, latest_article_published_at: null }))
+      }
+    }
+
     if (hasPagination) {
       return NextResponse.json({
         success: true,

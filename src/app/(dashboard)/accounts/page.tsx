@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Tag, Upload, Progress } from 'antd'
 import { PlusOutlined, SyncOutlined, ReloadOutlined, UploadOutlined, FileTextOutlined, SearchOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -197,7 +197,7 @@ export default function AccountsPage() {
     }
   }
 
-  const columns = [
+  const columns = useMemo(() => [
     { title: '名称', dataIndex: 'name', key: 'name', width: 180 },
     { title: '原始ID', dataIndex: 'wx_id', key: 'wx_id', width: 180 },
     {
@@ -207,6 +207,10 @@ export default function AccountsPage() {
     {
       title: '状态', dataIndex: 'status', key: 'status', width: 80,
       render: (v: string) => <Tag color={v === 'active' ? 'green' : 'default'}>{v === 'active' ? '启用' : '停用'}</Tag>
+    },
+    {
+      title: '最新文章日期', dataIndex: 'latest_article_published_at', key: 'latest_article_published_at', width: 140,
+      render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD') : '-'
     },
     {
       title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 160,
@@ -222,7 +226,7 @@ export default function AccountsPage() {
         </Space>
       )
     }
-  ]
+  ], [crawlLoading])
 
   const uploadProps: UploadProps = {
     accept: '.xlsx,.xls',
