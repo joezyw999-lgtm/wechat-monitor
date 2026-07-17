@@ -1,13 +1,17 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Card, Row, Col, Statistic, Button, message, Table, Tag, Space } from 'antd'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Card, Row, Col, Statistic, Button, message, Table, Tag, Space, Modal, Select } from 'antd'
 import { SyncOutlined, WalletOutlined, UserOutlined, CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useCachedFetch } from '@/lib/cache'
 
 export default function DashboardPage() {
   const [crawlLoading, setCrawlLoading] = useState(false)
+  const [crawlModalOpen, setCrawlModalOpen] = useState(false)
+  const [selectedKeywords, setSelectedKeywords] = useState<string[]>([])
+  const [keywordsList, setKeywordsList] = useState<string[]>([])
+  const [keywordsLoading, setKeywordsLoading] = useState(false)
 
   const fetchStats = useCallback(async () => {
     const res = await fetch('/api/dashboard')
@@ -18,17 +22,42 @@ export default function DashboardPage() {
 
   const { data: stats, loading, refresh } = useCachedFetch('dashboard-stats', fetchStats)
 
+  // Load keywords list when modal opens
+  const loadKeywords = useCallback(async () => {
+    setKeywordsLoading(true)
+    try {
+      const res = await fetch('/api/keywords')
+      const data = await res.json()
+      if (data.success) {
+        const words = (data.data.list || data.data || []).map((k: any) => k.word || k.keyword || k.name).filter(Boolean)
+        setKeywordsList(words)
+      }
+    } catch (e: any) {
+      message.error(e.message || '加载关键词失败')
+    } finally {
+      setKeywordsLoading(false)
+    }
+  }, [])
+
+  const handleOpenCrawl = useCallback(() => {
+    setSelectedKeywords([])
+    setCrawlModalOpen(true)
+    loadKeywords()
+  }, [loadKeywords])
+
   const handleCrawl = useCallback(async () => {
     setCrawlLoading(true)
+    setCrawlModalOpen(false)
     try {
       const res = await fetch('/api/crawl', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
-        body: '{}' 
+        body: JSON.stringify({ keywords: selectedKeywords })
       })
       const data = await res.json()
       if (data.success) {
-        message.success(`采集完成: 新增 ${data.data.articles_new} 篇, 命中 ${data.data.articles_matched} 篇`)
+        const kwDesc = selectedKeywords.length > 0 ? ` (${selectedKeywords.length} 个关键词)` : ' (全部关键词)'
+        message.success(`采集完成${kwDesc}: 新增 ${data.data.articles_new} 篇, 命中 ${data.data.articles_matched} 篇`)
         refresh()
       } else {
         message.error(data.message || '采集失败')
@@ -38,7 +67,7 @@ export default function DashboardPage() {
     } finally {
       setCrawlLoading(false)
     }
-  }, [refresh])
+  }, [refresh, selectedKeywords])
 
   const logColumns = [
     { title: '时间', dataIndex: 'started_at', key: 'started_at', width: 140, render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm') },
@@ -94,13 +123,50 @@ export default function DashboardPage() {
             type="primary" 
             icon={<SyncOutlined spin={crawlLoading} />} 
             loading={crawlLoading}
-            onClick={handleCrawl}
+            onClick={handleOpenCrawl}
             size="large"
           >
-            立即采集全部
+            立即采集
           </Button>
         </Space>
       </Card>
+
+      <Modal
+        title="开始采集"
+        open={crawlModalOpen}
+        onOk={handleCrawl}
+        onCancel={() => setCrawlModalOpen(false)}
+        okText="开始采集"
+        cancelText="取消"
+        confirmLoading={crawlLoading}
+        width={480}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 8, color: '#666' }}>
+            选择要采集的关键词范围：
+          </div>
+          <Select
+            mode="multiple"
+            placeholder="不选则使用全部启用关键词"
+            value={selectedKeywords}
+            onChange={setSelectedKeywords}
+            loading={keywordsLoading}
+            style={{ width: '100%' }}
+            options={keywordsList.map(w => ({ label: w, value: w }))}
+            maxTagCount="responsive"
+            allowClear
+            showSearch
+            filterOption={(input, option) =>
+              (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())
+            }
+          />
+        </div>
+        <div style={{ fontSize: 12, color: '#999' }}>
+          {selectedKeywords.length > 0
+            ? `已选择 ${selectedKeywords.length} 个关键词，本次只采集匹配这些关键词的文章`
+            : '未选择关键词，将使用系统中全部启用的关键词'}
+        </div>
+      </Modal>
 
       <Card title="最近采集日志">
         <Table

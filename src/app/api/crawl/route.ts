@@ -11,6 +11,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const accountId = body.accountId // optional, if not provided, crawl all
+    const keywordFilter: string[] | undefined = body.keywords && Array.isArray(body.keywords) && body.keywords.length > 0 ? body.keywords : undefined
     const client = getSupabaseServiceClient() as any
 
     // Get API key and article count from settings (bypass cache for fresh data)
@@ -40,11 +41,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: '没有可采集的公众号' }, { status: 400 })
     }
 
-    // Get active keywords
-    const { data: keywordsData, error: kwError } = await client
+    // Get active keywords (optionally filtered by user selection)
+    let keywordsQuery = client
       .from('keywords')
       .select('word')
       .eq('status', 'active')
+    if (keywordFilter) {
+      keywordsQuery = keywordsQuery.in('word', keywordFilter)
+    }
+    const { data: keywordsData, error: kwError } = await keywordsQuery
     if (kwError) throw kwError
     const keywords = keywordsData?.map((k: any) => k.word) || []
 
@@ -53,7 +58,8 @@ export async function POST(request: NextRequest) {
       .from('crawl_logs')
       .insert({
         status: 'running',
-        started_at: new Date().toISOString()
+        started_at: new Date().toISOString(),
+        keywords_used: keywordFilter ? keywordFilter.join(',') : null
       })
       .select()
       .single()

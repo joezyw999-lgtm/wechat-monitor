@@ -54,7 +54,7 @@ export async function GET(request: Request) {
     // Create crawl log
     const { data: logData } = await client
       .from('crawl_logs')
-      .insert({ status: 'running', message: 'Cron job started' })
+      .insert({ status: 'running', message: 'Cron job started', keywords_used: null })
       .select()
       .single()
 

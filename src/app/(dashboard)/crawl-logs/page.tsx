@@ -60,6 +60,17 @@ export default function CrawlLogsPage() {
     { title: '发现文章', dataIndex: 'articles_found', key: 'articles_found', width: 80, align: 'center' as const, render: (v: number) => v ?? 0 },
     { title: '命中文章', dataIndex: 'articles_matched', key: 'articles_matched', width: 80, align: 'center' as const, render: (v: number) => v ?? 0 },
     { title: '新增入库', dataIndex: 'articles_new', key: 'articles_new', width: 80, align: 'center' as const, render: (v: number) => v ?? 0 },
+    { title: '使用关键词', dataIndex: 'keywords_used', key: 'keywords_used', width: 180, ellipsis: true, render: (v: string) => {
+      if (!v) return <Tag color="default">全部关键词</Tag>
+      const parts = v.split(',')
+      if (parts.length <= 3) return parts.map((k: string) => <Tag key={k} color="blue" style={{ marginBottom: 4 }}>{k}</Tag>)
+      return (
+        <span title={v}>
+          {parts.slice(0, 3).map((k: string) => <Tag key={k} color="blue" style={{ marginBottom: 4 }}>{k}</Tag>)}
+          <Tag color="default">+{parts.length - 3}</Tag>
+        </span>
+      )
+    }},
     { title: '错误信息', dataIndex: 'message', key: 'message', ellipsis: true, render: (v: string) => v || '-' },
   ]
 
