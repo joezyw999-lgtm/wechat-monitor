@@ -33,6 +33,7 @@ export default function SettingsPage() {
           llm_api_base: result.data.llm_api_base || '',
           llm_api_key: llmKeyMasked ? '' : llmApiKey,
           llm_model: result.data.llm_model || 'deepseek-chat',
+          llm_batch_size: result.data.llm_batch_size || 15,
         })
       }
     } catch (error) { console.error(error) }
@@ -59,6 +60,7 @@ export default function SettingsPage() {
         payload.llm_api_key = values.llm_api_key
       }
       if (values.llm_model) payload.llm_model = values.llm_model
+      if (values.llm_batch_size) payload.llm_batch_size = String(values.llm_batch_size)
 
       const res = await fetch('/api/settings', {
         method: 'PUT',
@@ -125,6 +127,9 @@ export default function SettingsPage() {
         </Form.Item>
         <Form.Item name="llm_model" label="模型名称">
           <Input placeholder="deepseek-chat" />
+        </Form.Item>
+        <Form.Item name="llm_batch_size" label="批量大小">
+          <InputNumber min={5} max={50} style={{ width: '100%' }} placeholder="默认 15" />
         </Form.Item>
         <Form.Item>
           <Button type="primary" loading={loading} onClick={handleSave}>保存设置</Button>

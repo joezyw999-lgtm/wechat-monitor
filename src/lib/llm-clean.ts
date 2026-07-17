@@ -16,17 +16,18 @@ export interface ArticleForClean {
 }
 
 // 从 settings 表或环境变量读取 LLM 配置
-async function getLLMConfig(): Promise<{ baseUrl: string; apiKey: string; model: string }> {
+async function getLLMConfig(): Promise<{ baseUrl: string; apiKey: string; model: string; batchSize: number }> {
   let baseUrl = process.env.LLM_API_BASE || ''
   let apiKey = process.env.LLM_API_KEY || ''
   let model = process.env.LLM_MODEL || 'deepseek-chat'
+  let batchSize = 15
 
   try {
     const client = getSupabaseServiceClient()
     const { data } = await client
       .from('settings')
       .select('key, value')
-      .in('key', ['llm_api_base', 'llm_api_key', 'llm_model'])
+      .in('key', ['llm_api_base', 'llm_api_key', 'llm_model', 'llm_batch_size'])
 
     if (data && data.length > 0) {
       const settingsMap: Record<string, string> = {}
@@ -36,12 +37,13 @@ async function getLLMConfig(): Promise<{ baseUrl: string; apiKey: string; model:
       if (settingsMap.llm_api_base) baseUrl = settingsMap.llm_api_base
       if (settingsMap.llm_api_key) apiKey = settingsMap.llm_api_key
       if (settingsMap.llm_model) model = settingsMap.llm_model
+      if (settingsMap.llm_batch_size) batchSize = parseInt(settingsMap.llm_batch_size, 10) || 15
     }
   } catch {
     // settings 表查询失败就用环境变量
   }
 
-  return { baseUrl, apiKey, model }
+  return { baseUrl, apiKey, model, batchSize }
 }
 
 const SYSTEM_PROMPT = `你是一个招聘信息标准化助手。请对输入的公众号招聘文章进行标题标准化和信息抽取。
@@ -52,7 +54,7 @@ const SYSTEM_PROMPT = `你是一个招聘信息标准化助手。请对输入的
 3. 生成去重 key（公司名+招聘类型+招聘批次的组合，用于判断是否为同一招聘）
 
 输出要求：
-- 严格输出 JSON 数组，不要输出任何解释文字
+- 严格输出 JSON 对象，包含 results 数组，不要输出任何解释文字
 - 每个输入对应一个输出对象，顺序与输入一致
 - 不确定的字段返回空字符串 ""
 - 不要编造公司名，识别不到就返回空
@@ -61,15 +63,17 @@ const SYSTEM_PROMPT = `你是一个招聘信息标准化助手。请对输入的
 - 招聘批次：格式如 "2026秋季"、"2025暑期"，识别不到年份就只写季节
 
 JSON 格式：
-[
-  {
-    "company_name": "公司全称",
-    "recruit_type": "校招",
-    "recruit_batch": "2026秋季",
-    "standard_title": "标准标题",
-    "dedup_key": "公司名_校招_2026秋季"
-  }
-]`
+{
+  "results": [
+    {
+      "company_name": "公司全称",
+      "recruit_type": "校招",
+      "recruit_batch": "2026秋季",
+      "standard_title": "标准标题",
+      "dedup_key": "公司名_校招_2026秋季"
+    }
+  ]
+}`
 
 function buildUserPrompt(articles: ArticleForClean[]): string {
   return JSON.stringify(
@@ -124,21 +128,23 @@ export async function cleanArticlesWithLLM(
       }
 
       const data = await response.json()
-      const content = data.choices?.[0]?.message?.content || '[]'
+      const content = data.choices?.[0]?.message?.content || '{}'
 
       let parsed: LLMCleanResult[] = []
       try {
         const raw = JSON.parse(content)
-        // 兼容两种格式：直接数组 或 包了一层的对象
-        if (Array.isArray(raw)) {
-          parsed = raw
-        } else if (Array.isArray(raw.results)) {
+        // 优先读取 results 数组（固定对象格式）
+        if (Array.isArray(raw.results)) {
           parsed = raw.results
         } else if (Array.isArray(raw.data)) {
           parsed = raw.data
+        } else if (Array.isArray(raw)) {
+          parsed = raw
+        } else {
+          throw new Error('返回 JSON 中没有找到 results 数组')
         }
-      } catch {
-        throw new Error('LLM 返回 JSON 解析失败')
+      } catch (e) {
+        throw new Error('LLM 返回 JSON 解析失败：' + (e as Error).message)
       }
 
       // 按索引回填结果

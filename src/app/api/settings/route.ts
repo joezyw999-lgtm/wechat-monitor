@@ -10,6 +10,7 @@ const ALLOWED_KEYS = [
   'llm_api_base',
   'llm_api_key',
   'llm_model',
+  'llm_batch_size',
 ]
 
 export async function GET(request: NextRequest) {

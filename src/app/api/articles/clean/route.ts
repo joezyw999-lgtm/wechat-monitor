@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
 
     const client = getSupabaseServiceClient()
 
-    // 获取 LLM 配置
+    // 获取 LLM 配置（配置了 API 地址和 Key 才算启用）
     const { data: settingsData } = await client
       .from('settings')
       .select('key, value')
@@ -28,12 +28,13 @@ export async function POST(request: NextRequest) {
       settings[s.key] = s.value
     })
 
-    const llmEnabled = settings.llm_enabled === 'true'
+    const llmBaseUrl = settings.llm_api_base || ''
+    const llmApiKey = settings.llm_api_key || ''
     const llmBatchSize = parseInt(settings.llm_batch_size || '15', 10)
 
-    if (!llmEnabled) {
+    if (!llmBaseUrl || !llmApiKey) {
       return NextResponse.json(
-        { success: false, message: 'LLM 清洗未启用，请在系统设置中开启' },
+        { success: false, message: '请先在系统设置中配置 LLM API 地址和 Key' },
         { status: 400 }
       )
     }
