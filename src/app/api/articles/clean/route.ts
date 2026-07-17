@@ -39,11 +39,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 查询待清洗的文章
+    // 查询待清洗的文章（clean_status 为 pending 或 null 的都算待清洗）
     let query = client
       .from('articles')
       .select('id, title, original_title, summary, original_url, published_at')
-      .eq('clean_status', 'pending')
+      .or('clean_status.eq.pending,clean_status.is.null')
 
     if (ids && ids.length > 0) {
       query = query.in('id', ids)
@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
     }
 
     const total = pendingArticles.length
+    const titleMap = new Map(pendingArticles.map(a => [a.id, a.title]))
 
     // 分批次调用 LLM
     let cleanedCount = 0
@@ -224,37 +225,36 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 更新非重复文章
+        // 批量更新非重复文章
         if (nonDuplicate.length > 0) {
-          const { error: updateError } = await client
-            .from('articles')
-            .update({
-              clean_status: 'cleaned',
-              cleaned_at: new Date().toISOString(),
-            })
-            .in('id', nonDuplicate.map(a => a.id))
+          // 逐条更新（Supabase 不支持批量条件更新）
+          for (const article of nonDuplicate) {
+            const origTitle = titleMap.get(article.id) || ''
+            const titleToUse = article.standard_title && article.standard_title.trim()
+              ? article.standard_title
+              : origTitle
 
-          if (updateError) {
-            console.error('[Clean] Update cleaned status error:', updateError.message)
-            errors.push(`更新清洗状态失败: ${updateError.message}`)
-          } else {
-            // 再逐条更新详细字段
-            for (const article of nonDuplicate) {
-              await client
-                .from('articles')
-                .update({
-                  standard_title: article.standard_title,
-                  title: article.standard_title || undefined,
-                  dedup_key: article.dedup_key,
-                  company_name: article.company_name,
-                  recruit_type: article.recruit_type,
-                  recruit_batch: article.recruit_batch,
-                })
-                .eq('id', article.id)
+            const { error: updError } = await client
+              .from('articles')
+              .update({
+                clean_status: 'cleaned',
+                cleaned_at: new Date().toISOString(),
+                title: titleToUse,
+                standard_title: article.standard_title || null,
+                dedup_key: article.dedup_key || null,
+                company_name: article.company_name || null,
+                recruit_type: article.recruit_type || null,
+                recruit_batch: article.recruit_batch || null,
+              })
+              .eq('id', article.id)
+
+            if (updError) {
+              console.error(`[Clean] Update article ${article.id} error:`, updError.message)
+              errors.push(`更新文章失败: ${updError.message}`)
             }
-            cleanedCount += nonDuplicate.length
-            console.log(`[Clean] Cleaned ${nonDuplicate.length} articles`)
           }
+          cleanedCount += nonDuplicate.length
+          console.log(`[Clean] Cleaned ${nonDuplicate.length} articles`)
         }
       }
 

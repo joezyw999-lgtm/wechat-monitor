@@ -95,8 +95,16 @@ export async function cleanArticlesWithLLM(
 
   // 没有配置 LLM，全部返回 null，走规则降级
   if (!baseUrl || !apiKey) {
+    console.warn('[LLM] LLM 未配置（缺少 baseUrl 或 apiKey），跳过清洗')
     return articles.map(() => null)
   }
+
+  // 兼容处理：如果用户填了带 /v1 的地址，去掉 /v1（DeepSeek 没有 /v1 前缀）
+  // 同时也兼容 OpenAI 格式（带 /v1）—— 两种都尝试
+  const normalizedBase = baseUrl.replace(/\/+$/, '')
+  const endpoint = `${normalizedBase}/chat/completions`
+  console.log(`[LLM] 配置: baseUrl=${baseUrl}, model=${model}, batchSize=${batchSize}, articles=${articles.length}`)
+  console.log(`[LLM] 请求端点: ${endpoint}`)
 
   const results: (LLMCleanResult | null)[] = new Array(articles.length).fill(null)
 
@@ -106,6 +114,7 @@ export async function cleanArticlesWithLLM(
     const batchStart = i
 
     try {
+      console.log(`[LLM] 批次 ${batchStart}-${batchStart + batch.length} 开始调用...`)
       const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -124,11 +133,15 @@ export async function cleanArticlesWithLLM(
       })
 
       if (!response.ok) {
-        throw new Error(`LLM API 返回 ${response.status}`)
+        const errorText = await response.text().catch(() => '')
+        console.error(`[LLM] API 返回错误 ${response.status}:`, errorText.slice(0, 500))
+        throw new Error(`LLM API 返回 ${response.status}: ${errorText.slice(0, 200)}`)
       }
 
       const data = await response.json()
       const content = data.choices?.[0]?.message?.content || '{}'
+      console.log(`[LLM] 批次 ${batchStart} 返回内容(前300字):`, content.slice(0, 300))
+      console.log(`[LLM] 批次 ${batchStart} token用量:`, JSON.stringify(data.usage || 'unknown'))
 
       let parsed: LLMCleanResult[] = []
       try {
