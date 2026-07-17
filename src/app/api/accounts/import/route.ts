@@ -38,7 +38,8 @@ export async function POST(request: NextRequest) {
       const name = (row['公众号名称'] || row['name'] || '').toString().trim()
       const wxId = (row['原始ID'] || row['wx_id'] || row['wxId'] || '').toString().trim()
       let category = (row['分类'] || row['category'] || '官方').toString().trim()
-      let status = (row['状态'] || row['status'] || 'active').toString().trim()
+      let status = (row['状态'] || row['status'] || '').toString().trim()
+      if (!status) status = 'active'
 
       // 校验必填
       if (!name) {
