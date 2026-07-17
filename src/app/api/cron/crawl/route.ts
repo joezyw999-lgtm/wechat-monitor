@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase'
 import { fetchAccountArticles, matchKeywords } from '@/lib/api-client'
 import { processArticleDedupFields } from '@/lib/recruit-dedup'
+import { filterAccountsByCrawlLimit, recordAccountCrawl } from '@/lib/crawl-limit'
 
 // This route is called by Vercel Cron on a schedule
 export async function GET(request: Request) {
@@ -44,6 +45,36 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, message: 'No active accounts' })
     }
 
+    // 全局频率限制：过滤掉今天不能自动抓取的公众号
+    const { allowedAccounts, skipReason } = await filterAccountsByCrawlLimit(accounts, client)
+
+    if (allowedAccounts.length === 0) {
+      const reason = skipReason.weekend
+        ? '今天是周末，跳过自动抓取'
+        : skipReason.holiday
+        ? '今天是法定节假日，跳过自动抓取'
+        : skipReason.weeklyLimit > 0
+        ? `全部公众号本周已达5次抓取上限（${skipReason.weeklyLimit}个公众号被限制）`
+        : '无可抓取的公众号'
+
+      // 写一条跳过日志
+      await client.from('crawl_logs').insert({
+        status: 'skipped',
+        message: reason,
+        accounts_crawled: 0,
+        articles_found: 0,
+        articles_new: 0,
+        articles_matched: 0,
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+        keywords_used: null,
+      })
+
+      return NextResponse.json({ success: true, skipped: true, message: reason })
+    }
+
+    const finalAccounts: any[] = allowedAccounts
+
     // Get active keywords
     const { data: keywordsData } = await client
       .from('keywords')
@@ -85,7 +116,7 @@ export async function GET(request: Request) {
     }> = []
 
     // Crawl each account and collect articles
-    for (const account of accounts) {
+    for (const account of finalAccounts) {
       const result = await fetchAccountArticles(apiKey, account.wx_id, articleCount)
 
       if (!result.success) {
@@ -251,7 +282,7 @@ export async function GET(request: Request) {
       .update({
         status: totalFailed > 0 || errors.length > 0 ? 'partial' : 'success',
         message: errors.length > 0 ? errors.join('; ') : null,
-        accounts_crawled: accounts.length,
+        accounts_crawled: finalAccounts.length,
         articles_found: totalMatched,
         articles_new: totalNew,
         articles_matched: totalMatched,
@@ -260,6 +291,9 @@ export async function GET(request: Request) {
       .eq('id', logData.id)
 
     if (updateLogError) throw updateLogError
+
+    // 记录本次自动抓取的公众号，用于周次数统计
+    await recordAccountCrawl(finalAccounts.map((a: any) => a.id), client)
 
     // 清理超过4天的历史文章
     const cutoffDate = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString()
@@ -271,7 +305,16 @@ export async function GET(request: Request) {
       console.error('[Cron Crawl] Cleanup old articles error:', cleanupError.message)
     }
 
-    return NextResponse.json({ success: true, totalFound, totalNew, totalMatched, totalFailed })
+    return NextResponse.json({
+      success: true,
+      totalFound,
+      totalNew,
+      totalMatched,
+      totalFailed,
+      accountsCrawled: finalAccounts.length,
+      accountsTotal: accounts.length,
+      skippedByLimit: accounts.length - finalAccounts.length,
+    })
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
