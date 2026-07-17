@@ -8,7 +8,8 @@ export default function SettingsPage() {
   const [fetching, setFetching] = useState(true)
   const [form] = Form.useForm()
 
-  const [maskedKey, setMaskedKey] = useState(false)
+  const [maskedOneApiKey, setMaskedOneApiKey] = useState(false)
+  const [maskedLlmApiKey, setMaskedLlmApiKey] = useState(false)
 
   const fetchSettings = useCallback(async () => {
     setFetching(true)
@@ -17,22 +18,22 @@ export default function SettingsPage() {
       const result = await res.json()
       if (result.success) {
         const apiKey = result.data.oneapi_key || result.data.api_key || ''
-        // Check if the key is masked (contains ****)
-        if (apiKey.includes('****')) {
-          setMaskedKey(true)
-          form.setFieldsValue({
-            api_key: '', // Don't show masked value in form
-            cron_expression: result.data.cron_expression || '0 8 * * *',
-            article_count: result.data.article_count || 20
-          })
-        } else {
-          setMaskedKey(false)
-          form.setFieldsValue({
-            api_key: apiKey,
-            cron_expression: result.data.cron_expression || '0 8 * * *',
-            article_count: result.data.article_count || 20
-          })
-        }
+        const llmApiKey = result.data.llm_api_key || ''
+
+        const oneApiMasked = apiKey.includes('****')
+        const llmKeyMasked = llmApiKey.includes('****')
+
+        setMaskedOneApiKey(oneApiMasked)
+        setMaskedLlmApiKey(llmKeyMasked)
+
+        form.setFieldsValue({
+          api_key: oneApiMasked ? '' : apiKey,
+          article_count: result.data.article_count || 20,
+          cron_expression: result.data.cron_expression || '0 0 * * *',
+          llm_api_base: result.data.llm_api_base || '',
+          llm_api_key: llmKeyMasked ? '' : llmApiKey,
+          llm_model: result.data.llm_model || 'deepseek-chat',
+        })
       }
     } catch (error) { console.error(error) }
     finally { setFetching(false) }
@@ -44,15 +45,21 @@ export default function SettingsPage() {
     setLoading(true)
     try {
       const values = await form.validateFields()
-      // If the API key field is empty and was masked, don't send it (keep existing)
       const payload: Record<string, any> = {
         cron_expression: values.cron_expression,
-        article_count: values.article_count
+        article_count: values.article_count,
       }
       // Only include API key if user entered a new one
       if (values.api_key && !values.api_key.includes('****')) {
         payload.api_key = values.api_key
       }
+      // LLM settings
+      if (values.llm_api_base) payload.llm_api_base = values.llm_api_base
+      if (values.llm_api_key && !values.llm_api_key.includes('****')) {
+        payload.llm_api_key = values.llm_api_key
+      }
+      if (values.llm_model) payload.llm_model = values.llm_model
+
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -61,7 +68,6 @@ export default function SettingsPage() {
       const result = await res.json()
       if (result.success) {
         message.success('保存成功')
-        // Refresh settings to show masked key again
         fetchSettings()
       } else {
         message.error(result.message)
@@ -80,18 +86,45 @@ export default function SettingsPage() {
         <Form.Item 
           name="api_key" 
           label="OneAPI Key" 
-          rules={[{ required: !maskedKey, message: '请输入 API Key' }]}
-          extra={maskedKey ? '已配置，留空则保持不变' : undefined}
+          rules={[{ required: !maskedOneApiKey, message: '请输入 API Key' }]}
+          extra={maskedOneApiKey ? '已配置，留空则保持不变' : undefined}
         >
           <Input.Password 
-            placeholder={maskedKey ? '已配置，输入新 Key 可替换' : '输入你的 getoneapi.com API Key'} 
+            placeholder={maskedOneApiKey ? '已配置，输入新 Key 可替换' : '输入你的 getoneapi.com API Key'} 
           />
         </Form.Item>
         <Form.Item name="article_count" label="每次采集文章数量" rules={[{ required: true, message: '请输入采集数量' }]}>
           <InputNumber min={1} max={100} style={{ width: '100%' }} placeholder="默认 20" />
         </Form.Item>
         <Form.Item name="cron_expression" label="Cron 表达式" rules={[{ required: true }]}>
-          <Input placeholder="0 8 * * *" />
+          <Input placeholder="0 0 * * *" />
+        </Form.Item>
+
+        <div style={{ borderTop: '1px solid #f0f0f0', margin: '24px 0' }} />
+
+        <h3 style={{ marginBottom: 16 }}>LLM 标题清洗（可选）</h3>
+        <p style={{ color: '#666', fontSize: 12, marginBottom: 16 }}>
+          配置后将使用大模型对文章标题进行标准化清洗和去重，提高去重准确率。不配置则使用规则匹配。
+        </p>
+        <Form.Item
+          name="llm_api_base"
+          label="LLM API 地址"
+          extra="OpenAI 兼容接口地址，如 https://api.deepseek.com/v1"
+        >
+          <Input placeholder="https://api.deepseek.com/v1" />
+        </Form.Item>
+        <Form.Item
+          name="llm_api_key"
+          label="LLM API Key"
+          rules={maskedLlmApiKey ? [] : []}
+          extra={maskedLlmApiKey ? '已配置，留空则保持不变' : undefined}
+        >
+          <Input.Password
+            placeholder={maskedLlmApiKey ? '已配置，输入新 Key 可替换' : '输入 LLM API Key'}
+          />
+        </Form.Item>
+        <Form.Item name="llm_model" label="模型名称">
+          <Input placeholder="deepseek-chat" />
         </Form.Item>
         <Form.Item>
           <Button type="primary" loading={loading} onClick={handleSave}>保存设置</Button>

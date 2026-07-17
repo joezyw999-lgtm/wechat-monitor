@@ -2,7 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase'
 import { requireAuth } from '@/lib/auth'
 
-const ALLOWED_KEYS = ['api_key', 'oneapi_key', 'article_count', 'cron_expression']
+const ALLOWED_KEYS = [
+  'api_key',
+  'oneapi_key',
+  'article_count',
+  'cron_expression',
+  'llm_api_base',
+  'llm_api_key',
+  'llm_model',
+]
 
 export async function GET(request: NextRequest) {
   const session = await requireAuth(request)
@@ -16,7 +24,7 @@ export async function GET(request: NextRequest) {
     if (error) throw error
 
     const settings: Record<string, string> = {}
-    const sensitiveKeys = ['api_key', 'oneapi_key']
+    const sensitiveKeys = ['api_key', 'oneapi_key', 'llm_api_key']
     for (const item of data || []) {
       if (sensitiveKeys.includes(item.key) && item.value) {
         const v = item.value as string
@@ -51,7 +59,11 @@ export async function PUT(request: NextRequest) {
       }
 
       // 跳过掩码值（用户没改密码）
-      if ((key === 'api_key' || key === 'oneapi_key') && typeof value === 'string' && value.includes('****')) {
+      if (
+        (key === 'api_key' || key === 'oneapi_key' || key === 'llm_api_key') &&
+        typeof value === 'string' &&
+        value.includes('****')
+      ) {
         continue
       }
 
