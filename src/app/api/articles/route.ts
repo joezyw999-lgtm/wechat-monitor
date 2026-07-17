@@ -16,6 +16,8 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get('startDate')
     const endDate = searchParams.get('endDate')
     const isRead = searchParams.get('isRead')
+    const cleanStatus = searchParams.get('cleanStatus')
+    const includeDuplicates = searchParams.get('includeDuplicates') === 'true'
 
     const client = getSupabaseServiceClient()
 
@@ -23,7 +25,7 @@ export async function GET(request: NextRequest) {
     const needCount = page === 1
     // 有分类筛选时用 inner join，避免无关联账号的脏数据影响
     const accountSelect = category ? 'accounts!inner(name,category)' : 'accounts(name,category)'
-    const selectFields = `id,title,original_url,published_at,is_read,created_at,matched_keywords,summary,account_id,${accountSelect}`
+    const selectFields = `id,title,original_title,original_url,published_at,is_read,clean_status,created_at,matched_keywords,summary,account_id,${accountSelect}`
 
     let query = client
       .from('articles')
@@ -47,6 +49,13 @@ export async function GET(request: NextRequest) {
     }
     if (isRead !== null && isRead !== undefined) {
       query = query.eq('is_read', isRead === 'true')
+    }
+    if (cleanStatus) {
+      query = query.eq('clean_status', cleanStatus)
+    }
+    // 默认过滤重复文章
+    if (!includeDuplicates) {
+      query = query.or('clean_status.is.null,clean_status.neq.duplicate')
     }
 
     const from = (page - 1) * pageSize

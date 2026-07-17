@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase'
 import { fetchAccountArticles, matchKeywords } from '@/lib/api-client'
 import { requireAuth } from '@/lib/auth'
-import { processArticleDedupFields } from '@/lib/recruit-dedup'
-import { cleanArticlesWithLLM, type LLMCleanResult } from '@/lib/llm-clean'
 
 export async function POST(request: NextRequest) {
   const session = await requireAuth(request)
@@ -74,19 +72,11 @@ export async function POST(request: NextRequest) {
     let totalFailed = 0
     const errors: string[] = []
 
-    // Collect all articles from all accounts first
+    // Collect all articles from all accounts first (after keyword + time filter)
     const allArticles: Array<{
       account: any
       article: any
       matchedKw: string[]
-      dedup: {
-        original_title: string
-        normalized_title: string
-        company_name: string
-        recruit_type: string
-        recruit_batch: string
-        duplicate_key: string | null
-      }
     }> = []
 
     // Crawl each account and collect articles
@@ -126,60 +116,18 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // 生成去重相关字段
-        const dedup = processArticleDedupFields({
-          title: article.title,
-          digest: article.digest,
-        })
-
-        allArticles.push({ account, article, matchedKw, dedup })
+        allArticles.push({ account, article, matchedKw })
       }
     }
 
-    // LLM 批量清洗标题 + 生成去重字段（只对关键词命中的文章调用）
-    const llmResults: (LLMCleanResult | null)[] = allArticles.length > 0
-      ? await cleanArticlesWithLLM(
-          allArticles.map(a => ({
-            title: a.article.title,
-            summary: a.article.digest || '',
-            original_url: a.article.url,
-            published_at: a.article.publish_time
-              ? new Date(a.article.publish_time * 1000).toISOString()
-              : '',
-          })),
-          15,
-        )
-      : []
+    totalMatched = allArticles.length
 
-    // 合并 LLM 结果到每条文章，失败的降级为规则提取
-    const enhancedArticles = allArticles.map((item, idx) => {
-      const llm = llmResults[idx]
-      if (llm) {
-        return {
-          ...item,
-          llm,
-          useLLM: true,
-        }
-      }
-      return { ...item, llm: null, useLLM: false }
-    })
-
-    // Batch deduplication: check original_url, dedup_key, standard_title / normalized_title in bulk
-    const allUrls = enhancedArticles.map(a => a.article.url).filter(Boolean)
-    const allDedupKeys = enhancedArticles
-      .map(a => (a.useLLM ? a.llm?.dedup_key : a.dedup.duplicate_key) || '')
-      .filter(Boolean)
-    const allStandardTitles = enhancedArticles
-      .map(a => (a.useLLM ? a.llm?.standard_title : a.dedup.normalized_title) || '')
-      .filter(Boolean)
-
+    // 基础去重：按 original_url 去重（采集阶段只做 URL 级别的基础去重）
+    const allUrls = allArticles.map(a => a.article.url).filter(Boolean)
     let existingUrls = new Set<string>()
-    let existingDedupKeys = new Set<string>()
-    let existingStandardTitles = new Set<string>()
 
     const batchSize = 100
 
-    // 批量查已存在的 original_url
     if (allUrls.length > 0) {
       for (let i = 0; i < allUrls.length; i += batchSize) {
         const batch = allUrls.slice(i, i + batchSize)
@@ -194,101 +142,31 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 批量查已存在的 dedup_key
-    if (allDedupKeys.length > 0) {
-      for (let i = 0; i < allDedupKeys.length; i += batchSize) {
-        const batch = allDedupKeys.slice(i, i + batchSize)
-        const { data: existing } = await client
-          .from('articles')
-          .select('dedup_key')
-          .in('dedup_key', batch)
+    console.log(`[Crawl] Found ${existingUrls.size} existing URLs`)
 
-        if (existing) {
-          existing.forEach((e: any) => existingDedupKeys.add(e.dedup_key))
-        }
-      }
-    }
-
-    // 批量查已存在的 standard_title（同时兼容 normalized_title）
-    if (allStandardTitles.length > 0) {
-      for (let i = 0; i < allStandardTitles.length; i += batchSize) {
-        const batch = allStandardTitles.slice(i, i + batchSize)
-        const { data: existing } = await client
-          .from('articles')
-          .select('standard_title,normalized_title')
-          .or(`standard_title.in.(${batch.join(',')}),normalized_title.in.(${batch.join(',')})`)
-
-        if (existing) {
-          existing.forEach((e: any) => {
-            if (e.standard_title) existingStandardTitles.add(e.standard_title)
-            if (e.normalized_title) existingStandardTitles.add(e.normalized_title)
-          })
-        }
-      }
-    }
-
-    console.log(`[Crawl] Found ${existingUrls.size} existing URLs, ${existingStandardTitles.size} existing standard/normalized titles, ${existingDedupKeys.size} existing dedup keys`)
-
-    // Filter out duplicates: by URL, by standard/normalized title, by dedup_key
-    const newArticles = enhancedArticles.filter(a => {
-      // URL 去重
+    // Filter out duplicates by URL
+    const newArticles = allArticles.filter(a => {
       if (existingUrls.has(a.article.url)) return false
-      // 标准标题 / 标准化标题去重
-      const titleKey = a.useLLM ? a.llm?.standard_title : a.dedup.normalized_title
-      if (titleKey && existingStandardTitles.has(titleKey)) return false
-      // dedup_key / duplicate_key 去重（只有能提取到的时候才判重）
-      const dedupKey = a.useLLM ? a.llm?.dedup_key : a.dedup.duplicate_key
-      if (dedupKey && existingDedupKeys.has(dedupKey)) return false
       return true
     })
 
     totalDedupSkipped = allArticles.length - newArticles.length
-    console.log(`[Crawl] ${newArticles.length} new articles to insert (after dedup), skipped ${totalDedupSkipped} by dedup`)
+    console.log(`[Crawl] ${newArticles.length} new articles to insert (after URL dedup), skipped ${totalDedupSkipped} by dedup`)
 
-    // Batch insert new articles
+    // Batch insert new articles (clean_status = pending, 等待手动清洗)
     if (newArticles.length > 0) {
-      const insertData = newArticles.map(a => {
-        if (a.useLLM && a.llm) {
-          const llm = a.llm
-          return {
-            account_id: a.account.id,
-            title: llm.standard_title || a.article.title,
-            original_title: a.article.title,
-            standard_title: llm.standard_title || null,
-            normalized_title: null,
-            original_url: a.article.url,
-            summary: a.article.digest || null,
-            content: a.article.content || null,
-            published_at: new Date(a.article.publish_time * 1000).toISOString(),
-            unique_key: a.article.msg_id || null,
-            matched_keywords: a.matchedKw.join(','),
-            company_name: llm.company_name || null,
-            recruit_type: llm.recruit_type || null,
-            recruit_batch: llm.recruit_batch || null,
-            dedup_key: llm.dedup_key || null,
-            duplicate_key: null,
-          }
-        }
-        const dedup = a.dedup
-        return {
-          account_id: a.account.id,
-          title: dedup.normalized_title || a.article.title,
-          original_title: a.article.title,
-          standard_title: null,
-          normalized_title: dedup.normalized_title,
-          original_url: a.article.url,
-          summary: a.article.digest || null,
-          content: a.article.content || null,
-          published_at: new Date(a.article.publish_time * 1000).toISOString(),
-          unique_key: a.article.msg_id || null,
-          matched_keywords: a.matchedKw.join(','),
-          company_name: dedup.company_name || null,
-          recruit_type: dedup.recruit_type || null,
-          recruit_batch: dedup.recruit_batch || null,
-          dedup_key: null,
-          duplicate_key: dedup.duplicate_key || null,
-        }
-      })
+      const insertData = newArticles.map(a => ({
+        account_id: a.account.id,
+        title: a.article.title,
+        original_title: a.article.title,
+        original_url: a.article.url,
+        summary: a.article.digest || null,
+        content: a.article.content || null,
+        published_at: new Date(a.article.publish_time * 1000).toISOString(),
+        unique_key: a.article.msg_id || null,
+        matched_keywords: a.matchedKw.join(','),
+        clean_status: 'pending',
+      }))
 
       // Insert in batches of 50
       const insertBatchSize = 50
@@ -304,18 +182,11 @@ export async function POST(request: NextRequest) {
         } else {
           totalNew += batch.length
           console.log(`[Crawl] Inserted batch of ${batch.length} articles`)
-          // 把新插入的也加到去重集合里，避免同一批次内重复
           batch.forEach(item => {
-            if (item.standard_title) existingStandardTitles.add(item.standard_title)
-            if (item.normalized_title) existingStandardTitles.add(item.normalized_title)
-            if (item.dedup_key) existingDedupKeys.add(item.dedup_key)
-            if (item.duplicate_key) existingDedupKeys.add(item.duplicate_key)
             if (item.original_url) existingUrls.add(item.original_url)
           })
         }
       }
-
-      totalMatched = newArticles.length
     }
 
     // Update crawl log - use correct field names

@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import { Table, Button, Input, DatePicker, Select, Space, Tag, message, Modal, Popconfirm } from 'antd'
-import { SearchOutlined, ReloadOutlined, DeleteOutlined, CheckCircleOutlined, DownloadOutlined } from '@ant-design/icons'
+import { Table, Button, Input, DatePicker, Select, Space, Tag, message, Modal, Popconfirm, Checkbox } from 'antd'
+import { SearchOutlined, ReloadOutlined, DeleteOutlined, CheckCircleOutlined, DownloadOutlined, AimOutlined, ExperimentOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useCache } from '@/lib/cache'
 
@@ -14,7 +14,7 @@ export default function ArticlesPage() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const [filters, setFilters] = useState({ keyword: '', accountId: '', category: '', isRead: '', startDate: '', endDate: '' })
+  const [filters, setFilters] = useState({ keyword: '', accountId: '', category: '', isRead: '', startDate: '', endDate: '', cleanStatus: '', includeDuplicates: false })
   const [accounts, setAccounts] = useState<any[]>([])
   const [categories] = useState(['官方', '高校', '竞对'])
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
@@ -31,6 +31,8 @@ export default function ArticlesPage() {
     if (filters.accountId) params.set('accountId', filters.accountId)
     if (filters.category) params.set('category', filters.category)
     if (filters.isRead) params.set('isRead', filters.isRead)
+    if (filters.cleanStatus) params.set('cleanStatus', filters.cleanStatus)
+    if (filters.includeDuplicates) params.set('includeDuplicates', 'true')
     if (filters.startDate) params.set('startDate', filters.startDate)
     if (filters.endDate) params.set('endDate', filters.endDate)
     return params.toString()
@@ -95,7 +97,7 @@ export default function ArticlesPage() {
     setSelectedRowKeys([])
   }, [])
 
-  const handleFilterChange = useCallback((key: string, value: string) => {
+  const handleFilterChange = useCallback((key: string, value: string | boolean) => {
     setFilters(prev => ({ ...prev, [key]: value }))
     setPage(1)
     setSelectedRowKeys([])
@@ -179,6 +181,73 @@ export default function ArticlesPage() {
     })
   }, [filters, cache, fetchData])
 
+  const handleCleanSelected = useCallback(() => {
+    if (selectedRowKeys.length === 0) return
+    Modal.confirm({
+      title: '确认清洗选中文章',
+      content: `确定调用 LLM 清洗选中的 ${selectedRowKeys.length} 篇文章吗？将生成标准标题并去重。`,
+      okText: '确认清洗',
+      cancelText: '取消',
+      onOk: async () => {
+        const hide = message.loading('清洗中...', 0)
+        try {
+          const res = await fetch('/api/articles/clean', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: selectedRowKeys })
+          })
+          const result = await res.json()
+          hide()
+          if (result.success) {
+            const { cleaned, duplicates, failed, total } = result.data
+            message.success(`清洗完成：共 ${total} 篇，成功 ${cleaned} 篇，重复 ${duplicates} 篇，失败 ${failed} 篇`)
+            setSelectedRowKeys([])
+            cache.invalidate('dashboard-stats')
+            fetchData()
+          } else {
+            message.error(result.message || '清洗失败')
+          }
+        } catch (error: any) {
+          hide()
+          message.error(error.message || '清洗失败')
+        }
+      }
+    })
+  }, [selectedRowKeys, cache, fetchData])
+
+  const handleCleanAllPending = useCallback(() => {
+    Modal.confirm({
+      title: '一键清洗全部未处理文章',
+      content: '确定调用 LLM 清洗所有 pending 状态的文章吗？可能需要较长时间。',
+      okText: '确认清洗',
+      cancelText: '取消',
+      onOk: async () => {
+        const hide = message.loading('清洗中，请稍候...', 0)
+        try {
+          const res = await fetch('/api/articles/clean', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          })
+          const result = await res.json()
+          hide()
+          if (result.success) {
+            const { cleaned, duplicates, failed, total } = result.data
+            message.success(`清洗完成：共 ${total} 篇，成功 ${cleaned} 篇，重复 ${duplicates} 篇，失败 ${failed} 篇`)
+            setSelectedRowKeys([])
+            cache.invalidate('dashboard-stats')
+            fetchData()
+          } else {
+            message.error(result.message || '清洗失败')
+          }
+        } catch (error: any) {
+          hide()
+          message.error(error.message || '清洗失败')
+        }
+      }
+    })
+  }, [cache, fetchData])
+
   useEffect(() => {
     fetchData()
   }, [fetchData])
@@ -234,7 +303,12 @@ export default function ArticlesPage() {
       return keywords.map((k: string) => <Tag color="blue" key={k}>{k}</Tag>)
     }},
     { title: '发布时间', dataIndex: 'published_at', key: 'published_at', width: 160, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-' },
-    { title: '状态', dataIndex: 'is_read', key: 'is_read', width: 80, render: (v: boolean) => <Tag color={v ? 'default' : 'red'}>{v ? '已读' : '未读'}</Tag> }
+    { title: '状态', dataIndex: 'is_read', key: 'is_read', width: 80, render: (v: boolean) => <Tag color={v ? 'default' : 'red'}>{v ? '已读' : '未读'}</Tag> },
+    { title: '清洗状态', dataIndex: 'clean_status', key: 'clean_status', width: 100, render: (v: string) => {
+      const colorMap: Record<string, string> = { pending: 'default', cleaned: 'green', duplicate: 'orange', failed: 'red' }
+      const labelMap: Record<string, string> = { pending: '待清洗', cleaned: '已清洗', duplicate: '重复', failed: '失败' }
+      return v ? <Tag color={colorMap[v] || 'default'}>{labelMap[v] || v}</Tag> : <Tag color="default">待清洗</Tag>
+    }},
   ], [handleMarkRead])
 
   const pagination = useMemo(() => ({
@@ -288,9 +362,42 @@ export default function ArticlesPage() {
           onChange={v => handleFilterChange('isRead', v || '')}
           options={[{ value: 'true', label: '已读' }, { value: 'false', label: '未读' }]} 
         />
+        <Select 
+          placeholder="清洗状态" 
+          style={{ width: 130 }} 
+          allowClear 
+          onChange={v => handleFilterChange('cleanStatus', v || '')}
+          options={[
+            { value: 'pending', label: '待清洗' },
+            { value: 'cleaned', label: '已清洗' },
+            { value: 'duplicate', label: '重复' },
+            { value: 'failed', label: '清洗失败' },
+          ]} 
+        />
+        <Checkbox 
+          checked={filters.includeDuplicates} 
+          onChange={e => handleFilterChange('includeDuplicates', e.target.checked)}
+        >
+          显示重复文章
+        </Checkbox>
         <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>搜索</Button>
         <Button icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>
         <Button icon={<DownloadOutlined />} onClick={handleExport}>导出Excel</Button>
+        <Button 
+          type="default"
+          icon={<ExperimentOutlined />}
+          onClick={handleCleanAllPending}
+        >
+          一键清洗未处理
+        </Button>
+        <Button 
+          type="default" 
+          icon={<ExperimentOutlined />}
+          disabled={selectedRowKeys.length === 0}
+          onClick={handleCleanSelected}
+        >
+          清洗选中
+        </Button>
         <Popconfirm
           title="确认全部标记已读"
           description="将当前筛选条件下的所有文章标记为已读，确定要继续吗？"

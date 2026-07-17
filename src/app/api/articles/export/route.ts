@@ -18,6 +18,8 @@ export async function GET(request: Request) {
     const startDate = searchParams.get('startDate') || ''
     const endDate = searchParams.get('endDate') || ''
     const isRead = searchParams.get('isRead') || ''
+    const cleanStatus = searchParams.get('cleanStatus') || ''
+    const includeDuplicates = searchParams.get('includeDuplicates') === 'true'
 
     const client = getSupabaseServiceClient()
     const maxRows = 5000
@@ -27,9 +29,11 @@ export async function GET(request: Request) {
       .select(`
         id,
         title,
+        original_title,
         original_url,
         published_at,
         is_read,
+        clean_status,
         created_at,
         matched_keywords,
         summary,
@@ -41,6 +45,13 @@ export async function GET(request: Request) {
       `)
       .order('published_at', { ascending: false })
       .limit(maxRows)
+
+    if (!includeDuplicates) {
+      query = query.neq('clean_status', 'duplicate')
+    }
+    if (cleanStatus) {
+      query = query.eq('clean_status', cleanStatus)
+    }
 
     if (keyword) {
       query = query.or(`title.ilike.%${keyword}%,summary.ilike.%${keyword}%`)

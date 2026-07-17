@@ -32,17 +32,19 @@ export async function GET(request: NextRequest) {
         .select('*', { count: 'exact', head: true })
         .eq('status', 'active'),
 
-      // 未读文章数
+      // 未读文章数（排除重复）
       client
         .from('articles')
         .select('*', { count: 'exact', head: true })
-        .eq('is_read', false),
+        .eq('is_read', false)
+        .neq('clean_status', 'duplicate'),
 
-      // 今日新增文章数
+      // 今日新增文章数（排除重复）
       client
         .from('articles')
         .select('*', { count: 'exact', head: true })
-        .gte('created_at', todayStart.toISOString()),
+        .gte('created_at', todayStart.toISOString())
+        .neq('clean_status', 'duplicate'),
 
       // 最近采集日志
       client
