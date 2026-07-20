@@ -132,13 +132,20 @@ export async function PUT(request: NextRequest) {
     // 批量标记已读
     if (body.markAll) {
       const filters = body.filters || {}
-      let query = client.from('articles').update({ is_read: body.isRead, updated_at: new Date().toISOString() })
+      let query = client
+        .from('articles')
+        .update({ is_read: body.isRead, updated_at: new Date().toISOString() })
+        .not('id', 'is', null) // 兜底 where 子句，避免无条件全表更新被 PostgreSQL 拦截
+        .neq('clean_status', 'duplicate') // 默认排除重复文章
 
       if (filters.keyword) {
         query = query.or(`title.ilike.%${filters.keyword}%,summary.ilike.%${filters.keyword}%`)
       }
       if (filters.accountId) {
         query = query.eq('account_id', filters.accountId)
+      }
+      if (filters.category) {
+        query = query.eq('accounts.category', filters.category)
       }
       if (filters.startDate) {
         query = query.gte('published_at', filters.startDate)
@@ -149,10 +156,14 @@ export async function PUT(request: NextRequest) {
       if (filters.isRead !== undefined && filters.isRead !== null && filters.isRead !== '') {
         query = query.eq('is_read', filters.isRead === 'true' || filters.isRead === true)
       }
+      if (filters.includeDuplicates === true || filters.includeDuplicates === 'true') {
+        // 用户勾选了显示重复，移除 duplicate 过滤
+        query = query.not('id', 'is', null)
+      }
 
-      const { error } = await query.select('id')
+      const { data, error } = await query.select('id')
       if (error) throw error
-      const updated = (query as any).count || 0
+      const updated = Array.isArray(data) ? data.length : 0
 
       return NextResponse.json({ success: true, data: { updated } })
     }
