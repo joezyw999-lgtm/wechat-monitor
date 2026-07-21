@@ -1,43 +1,38 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Card, Statistic, Table, Tag, DatePicker, Space, Button, message, Spin, Alert, Row, Col } from 'antd'
-import { WalletOutlined, ReloadOutlined, DollarOutlined, HistoryOutlined, ApiOutlined } from '@ant-design/icons'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Card, Statistic, Table, Tag, DatePicker, Button, message, Spin, Alert, Row, Col, Tooltip } from 'antd'
+import { WalletOutlined, ReloadOutlined, DollarOutlined, HistoryOutlined, ApiOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 
 const { RangePicker } = DatePicker
 
-// API pricing map (yuan per call)
-const API_PRICING: Record<string, number> = {
-  '/api/wechat-mp-v2/fetch_mp_services': 0.15,
-  '/api/wechat-mp-v2/fetch_mp_related_articles': 0.15,
-  '/api/wechat-mp-v2/fetch_mp_article_stats': 0.15,
-  '/api/wechat-mp-v2/fetch_mp_article_list': 0.15,
-  '/api/wechat-mp-v2/fetch_mp_article_ad': 0.15,
-  '/api/wechat-mp-v2/fetch_mp_article_comment_list': 0.15,
-  '/api/wechat-mp-v2/fetch_mp_article_comment_reply_list': 0.15,
-  '/api/wechat-mp-v2/fetch_mp_article_detail': 0.15,
-  '/api/wechat-mp-v2/fetch_mp_profile': 0.15,
-}
+// 统一单价：¥0.15/次
+const UNIT_PRICE = 0.15
 
-// Default pricing for unknown APIs
-const DEFAULT_PRICING = 0.15
-
-interface UsageRecord {
-  date: string
-  records: Array<{
+interface UsageRecordItem {
+  id?: string
+  time?: string
+  date?: string
+  api?: string
+  code?: string
+  status?: 'success' | 'failed' | string
+  success?: boolean
+  cost?: number
+  // 兼容按天聚合格式
+  records?: Array<{
     code: string
     successCount: number
   }>
 }
 
-interface FlattenedRecord {
+interface TableRecord {
   key: string
-  date: string
+  time: string
   apiName: string
-  callCount: number
-  unitPrice: number
-  totalCost: number
+  status: 'success' | 'failed' | 'unknown'
+  cost: number
+  raw: any
 }
 
 export default function BalancePage() {
