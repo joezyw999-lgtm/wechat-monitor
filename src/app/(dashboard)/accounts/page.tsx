@@ -213,6 +213,10 @@ export default function AccountsPage() {
       render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD') : '-'
     },
     {
+      title: '最后抓取时间', dataIndex: 'last_crawled_at', key: 'last_crawled_at', width: 140,
+      render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-'
+    },
+    {
       title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 160,
       render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm')
     },

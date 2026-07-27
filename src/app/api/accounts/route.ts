@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
 
     const needCount = page === 1
     const selectStr = hasPagination
-      ? 'id,name,wx_id,category,status,created_at,updated_at'
+      ? 'id,name,wx_id,category,status,created_at,updated_at,last_crawled_at'
       : '*'
 
     let query = client

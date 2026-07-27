@@ -39,7 +39,13 @@ export async function GET(request: NextRequest) {
       query = query.eq('account_id', accountId)
     }
     if (category) {
-      query = query.eq('accounts.category', category)
+      // 支持逗号分隔的多分类，如 "竞对,高校"
+      if (category.includes(',')) {
+        const categories = category.split(',').map(c => c.trim())
+        query = query.in('accounts.category', categories)
+      } else {
+        query = query.eq('accounts.category', category)
+      }
     }
     if (startDate) {
       query = query.gte('published_at', startDate)

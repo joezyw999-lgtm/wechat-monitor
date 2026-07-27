@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import { Table, Button, Input, DatePicker, Select, Space, Tag, message, Modal, Popconfirm, Checkbox } from 'antd'
+import { Table, Button, Input, DatePicker, Select, Space, Tag, message, Modal, Popconfirm, Checkbox, Tabs } from 'antd'
 import { SearchOutlined, ReloadOutlined, DeleteOutlined, CheckCircleOutlined, DownloadOutlined, AimOutlined, ExperimentOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useCache } from '@/lib/cache'
@@ -14,7 +14,8 @@ export default function ArticlesPage() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const [filters, setFilters] = useState({ keyword: '', accountId: '', category: '', isRead: '', startDate: '', endDate: '', cleanStatus: '', includeDuplicates: false })
+  const [filters, setFilters] = useState({ keyword: '', accountId: '', category: '官方', isRead: '', startDate: '', endDate: '', cleanStatus: '', includeDuplicates: false })
+  const [activeTab, setActiveTab] = useState('官方')
   const [accounts, setAccounts] = useState<any[]>([])
   const [categories] = useState(['官方', '高校', '竞对'])
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
@@ -322,6 +323,19 @@ export default function ArticlesPage() {
 
   return (
     <div>
+      <Tabs
+        activeKey={activeTab}
+        onChange={(key) => {
+          setActiveTab(key)
+          setFilters({ ...filters, category: key === '竞对高校' ? '竞对,高校' : key })
+          setPage(1)
+        }}
+        items={[
+          { key: '官方', label: '官方账号文章' },
+          { key: '竞对高校', label: '竞对/高校文章' },
+        ]}
+        style={{ marginBottom: 0 }}
+      />
       <Space style={{ marginBottom: 16 }} wrap>
         <Input 
           placeholder="搜索标题/摘要" 

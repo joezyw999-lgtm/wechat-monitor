@@ -171,6 +171,12 @@ export async function GET(request: Request) {
 
         allArticles.push({ account, article, matchedKw })
       }
+
+      // Update last_crawled_at for this account (regardless of whether new articles were found)
+      await client
+        .from('accounts')
+        .update({ last_crawled_at: new Date().toISOString() })
+        .eq('id', account.id)
     }
 
     totalMatched = allArticles.length

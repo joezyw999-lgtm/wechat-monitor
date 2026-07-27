@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Card, Statistic, Table, Tag, DatePicker, Button, message, Spin, Alert, Row, Col, Tooltip } from 'antd'
-import { WalletOutlined, ReloadOutlined, DollarOutlined, HistoryOutlined, ApiOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Card, Statistic, Table, Tag, DatePicker, Button, message, Alert, Row, Col, Space } from 'antd'
+import { WalletOutlined, ReloadOutlined, DollarOutlined, HistoryOutlined, ApiOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 
 const { RangePicker } = DatePicker
@@ -10,35 +10,20 @@ const { RangePicker } = DatePicker
 // 统一单价：¥0.15/次
 const UNIT_PRICE = 0.15
 
-interface UsageRecordItem {
-  id?: string
-  time?: string
-  date?: string
-  api?: string
-  code?: string
-  status?: 'success' | 'failed' | string
-  success?: boolean
-  cost?: number
-  // 兼容按天聚合格式
-  records?: Array<{
-    code: string
-    successCount: number
-  }>
-}
-
+// 使用记录表格行类型
 interface TableRecord {
   key: string
-  time: string
+  date: string
   apiName: string
-  status: 'success' | 'failed' | 'unknown'
-  cost: number
-  raw: any
+  callCount: number
+  unitPrice: number
+  totalCost: number
 }
 
 export default function BalancePage() {
   const [loading, setLoading] = useState(false)
   const [balance, setBalance] = useState<number | null>(null)
-  const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([])
+  const [usageRecords, setUsageRecords] = useState<any[]>([])
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([
     dayjs().subtract(30, 'day'),
     dayjs()
@@ -107,19 +92,44 @@ export default function BalancePage() {
   }
 
   // Flatten usage records for table display
-  const flattenedRecords: FlattenedRecord[] = usageRecords.flatMap((dayRecord, dayIndex) =>
-    dayRecord.records.map((record, recordIndex) => {
-      const unitPrice = API_PRICING[record.code] ?? DEFAULT_PRICING
-      return {
-        key: `${dayRecord.date}-${record.code}-${recordIndex}`,
-        date: dayRecord.date,
-        apiName: record.code,
-        callCount: record.successCount,
-        unitPrice,
-        totalCost: record.successCount * unitPrice,
+  // 兼容两种格式：
+  // 1. 按天聚合：[{ date, records: [{ code, successCount }] }]
+  // 2. 逐条明细：[{ time, api, status, cost }]
+  const flattenedRecords: TableRecord[] = (() => {
+    if (!usageRecords || usageRecords.length === 0) return []
+
+    // 检测是否是逐条明细格式
+    const first = usageRecords[0]
+    if (first.time !== undefined || first.api !== undefined) {
+      // 逐条明细格式
+      return usageRecords.map((item: any, idx: number) => ({
+        key: item.time || item.id || `record-${idx}`,
+        date: item.time || item.date || '',
+        apiName: item.api || item.code || 'unknown',
+        callCount: 1,
+        unitPrice: UNIT_PRICE,
+        totalCost: typeof item.cost === 'number' ? item.cost : UNIT_PRICE,
+      }))
+    }
+
+    // 按天聚合格式：展开成逐条
+    const records: TableRecord[] = []
+    usageRecords.forEach((dayRecord: any, dayIdx: number) => {
+      if (dayRecord.records && Array.isArray(dayRecord.records)) {
+        dayRecord.records.forEach((record: any, recordIdx: number) => {
+          records.push({
+            key: `${dayRecord.date}-${record.code}-${recordIdx}`,
+            date: dayRecord.date,
+            apiName: record.code || 'unknown',
+            callCount: record.successCount || 0,
+            unitPrice: UNIT_PRICE,
+            totalCost: (record.successCount || 0) * UNIT_PRICE,
+          })
+        })
       }
     })
-  )
+    return records
+  })()
 
   // Calculate totals
   const totalCalls = flattenedRecords.reduce((sum, r) => sum + r.callCount, 0)
@@ -131,8 +141,14 @@ export default function BalancePage() {
       title: '日期',
       dataIndex: 'date',
       key: 'date',
-      render: (v: string) => dayjs(v).format('YYYY-MM-DD'),
-      sorter: (a: FlattenedRecord, b: FlattenedRecord) => a.date.localeCompare(b.date),
+      render: (v: string) => {
+        // 如果包含时间信息，显示完整时间；否则只显示日期
+        if (v && (v.includes('T') || v.includes(':'))) {
+          return dayjs(v).format('YYYY-MM-DD HH:mm')
+        }
+        return dayjs(v).format('YYYY-MM-DD')
+      },
+      sorter: (a: TableRecord, b: TableRecord) => a.date.localeCompare(b.date),
       defaultSortOrder: 'descend' as const,
     },
     {
@@ -149,7 +165,7 @@ export default function BalancePage() {
       dataIndex: 'callCount',
       key: 'callCount',
       render: (v: number) => <span style={{ fontWeight: 500 }}>{v} 次</span>,
-      sorter: (a: FlattenedRecord, b: FlattenedRecord) => a.callCount - b.callCount,
+      sorter: (a: TableRecord, b: TableRecord) => a.callCount - b.callCount,
     },
     {
       title: '单价 (元)',
@@ -162,7 +178,7 @@ export default function BalancePage() {
       dataIndex: 'totalCost',
       key: 'totalCost',
       render: (v: number) => <span style={{ color: '#f5222d', fontWeight: 500 }}>-¥{v.toFixed(4)}</span>,
-      sorter: (a: FlattenedRecord, b: FlattenedRecord) => a.totalCost - b.totalCost,
+      sorter: (a: TableRecord, b: TableRecord) => a.totalCost - b.totalCost,
     },
   ]
 
