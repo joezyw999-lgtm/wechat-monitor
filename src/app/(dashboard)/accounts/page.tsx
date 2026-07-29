@@ -156,7 +156,7 @@ export default function AccountsPage() {
       })
       const result = await res.json()
       if (result.success) {
-        message.success(`采集完成: 新增 ${result.data.newArticles} 篇`)
+        message.success(`采集完成: 新增 ${result.data.articles_new ?? 0} 篇`)
         cache.invalidate('dashboard-stats')
         cache.invalidate('articles-list')
       } else {

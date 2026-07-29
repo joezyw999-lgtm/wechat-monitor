@@ -69,161 +69,186 @@ export async function POST(request: NextRequest) {
       .single()
     if (logError) throw logError
 
+    // Counters
     let totalFound = 0
     let totalSkippedOld = 0
     let totalNew = 0
     let totalMatched = 0
     let totalDedupSkipped = 0
     let totalFailed = 0
+    let accountsProcessed = 0
     const errors: string[] = []
 
-    // Collect all articles from all accounts first (after keyword + time filter)
-    const allArticles: Array<{
-      account: any
-      article: any
-      matchedKw: string[]
-    }> = []
+    // 4-day cutoff
+    const now = Date.now()
+    const FOUR_DAYS_MS = 4 * 24 * 60 * 60 * 1000
+    const cutoffTime = now - FOUR_DAYS_MS
 
-    // Crawl each account and collect articles
-    let crawledCount = 0
+    // Process each account individually: fetch -> filter -> dedup -> insert
     for (const account of accounts) {
-      crawledCount++
-      if (crawledCount % 20 === 0) {
-        console.log(`[Crawl] Progress: ${crawledCount}/${accounts.length} accounts crawled`)
-      }
+      accountsProcessed++
       
-      const result = await fetchAccountArticles(apiKey, account.wx_id, articleCount)
-      
-      if (!result.success) {
-        totalFailed++
-        errors.push(`${account.name}: ${result.error}`)
-        continue
-      }
-
-      // Log how many articles were returned from API
-      console.log(`[Crawl] Account ${account.name} (${account.wx_id}): API returned ${result.articles.length} articles`)
-      totalFound += result.articles.length
-
-      // Filter by publish time - only keep articles from the last 4 days
-      const now = Date.now()
-      const FOUR_DAYS_MS = 4 * 24 * 60 * 60 * 1000
-      const cutoffTime = now - FOUR_DAYS_MS
-
-      const recentArticles = result.articles.filter((article: any) => {
-        const pubTime = article.published_at || article.publish_time
-        if (!pubTime) return false
-        const timestamp = new Date(pubTime).getTime()
-        return !isNaN(timestamp) && timestamp >= cutoffTime
-      })
-
-      totalSkippedOld += result.articles.length - recentArticles.length
-
-      for (const article of recentArticles) {
-        // Match keywords first - only save articles that match at least one keyword
-        const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
+      try {
+        // 1. Fetch articles from API
+        const result = await fetchAccountArticles(apiKey, account.wx_id, articleCount)
         
-        if (matchedKw.length === 0) {
-          console.log(`[Crawl] Skipping (no keyword match): ${article.title}`)
+        if (!result.success) {
+          totalFailed++
+          errors.push(`${account.name}: ${result.error}`)
+          console.log(`[Crawl] [${accountsProcessed}/${accounts.length}] ${account.name} FAILED: ${result.error}`)
+          // Still update last_crawled_at even on failure
+          await client
+            .from('accounts')
+            .update({ last_crawled_at: new Date().toISOString() })
+            .eq('id', account.id)
           continue
         }
 
-        allArticles.push({ account, article, matchedKw })
-      }
+        console.log(`[Crawl] [${accountsProcessed}/${accounts.length}] ${account.name}: API returned ${result.articles.length} articles`)
+        totalFound += result.articles.length
 
-      // Update last_crawled_at for this account (regardless of whether new articles were found)
-      await client
-        .from('accounts')
-        .update({ last_crawled_at: new Date().toISOString() })
-        .eq('id', account.id)
-    }
+        // 2. Filter by publish time - only keep articles from the last 4 days
+        const recentArticles = result.articles.filter((article: any) => {
+          const pubTime = article.published_at || article.publish_time
+          if (!pubTime) return false
+          const timestamp = typeof pubTime === 'number' ? pubTime * 1000 : new Date(pubTime).getTime()
+          return !isNaN(timestamp) && timestamp >= cutoffTime
+        })
 
-    totalMatched = allArticles.length
+        totalSkippedOld += result.articles.length - recentArticles.length
 
-    // 基础去重：按 original_url 去重（采集阶段只做 URL 级别的基础去重）
-    const allUrls = allArticles.map(a => a.article.url).filter(Boolean)
-    let existingUrls = new Set<string>()
-
-    const batchSize = 100
-
-    if (allUrls.length > 0) {
-      for (let i = 0; i < allUrls.length; i += batchSize) {
-        const batch = allUrls.slice(i, i + batchSize)
-        const { data: existing } = await client
-          .from('articles')
-          .select('original_url')
-          .in('original_url', batch)
-
-        if (existing) {
-          existing.forEach((e: any) => existingUrls.add(e.original_url))
+        // 3. Match keywords
+        const matchedArticles: Array<{ article: any; matchedKw: string[] }> = []
+        for (const article of recentArticles) {
+          const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
+          if (matchedKw.length === 0) {
+            continue
+          }
+          matchedArticles.push({ article, matchedKw })
         }
-      }
-    }
 
-    console.log(`[Crawl] Found ${existingUrls.size} existing URLs`)
+        totalMatched += matchedArticles.length
 
-    // Filter out duplicates by URL
-    const newArticles = allArticles.filter(a => {
-      if (existingUrls.has(a.article.url)) return false
-      return true
-    })
+        if (matchedArticles.length === 0) {
+          // No matching articles, just update last_crawled_at
+          await client
+            .from('accounts')
+            .update({ last_crawled_at: new Date().toISOString() })
+            .eq('id', account.id)
+          
+          // Update progress in crawl log
+          await client
+            .from('crawl_logs')
+            .update({
+              accounts_crawled: accountsProcessed,
+              articles_found: totalFound,
+              articles_new: totalNew,
+              articles_matched: totalMatched,
+            })
+            .eq('id', logData.id)
+          continue
+        }
 
-    totalDedupSkipped = allArticles.length - newArticles.length
-    console.log(`[Crawl] ${newArticles.length} new articles to insert (after URL dedup), skipped ${totalDedupSkipped} by dedup`)
+        // 4. Dedup by original_url for this account's articles
+        const urls = matchedArticles.map(a => a.article.url).filter(Boolean)
+        const existingUrls = new Set<string>()
 
-    // Batch insert new articles (clean_status = pending, 等待手动清洗)
-    if (newArticles.length > 0) {
-      const insertData = newArticles.map(a => ({
-        account_id: a.account.id,
-        title: a.article.title,
-        original_title: a.article.title,
-        original_url: a.article.url,
-        summary: a.article.digest || null,
-        content: a.article.content || null,
-        published_at: new Date(a.article.publish_time * 1000).toISOString(),
-        unique_key: a.article.msg_id || null,
-        matched_keywords: a.matchedKw.join(','),
-        clean_status: 'pending',
-      }))
+        if (urls.length > 0) {
+          const { data: existing } = await client
+            .from('articles')
+            .select('original_url')
+            .in('original_url', urls)
 
-      // Insert in batches of 50
-      const insertBatchSize = 50
-      for (let i = 0; i < insertData.length; i += insertBatchSize) {
-        const batch = insertData.slice(i, i + insertBatchSize)
-        const { error: insertError } = await client
-          .from('articles')
-          .insert(batch)
+          if (existing) {
+            existing.forEach((e: any) => existingUrls.add(e.original_url))
+          }
+        }
 
-        if (insertError) {
-          console.error(`[Crawl] Batch insert error:`, insertError.message)
-          errors.push(`Batch insert error: ${insertError.message}`)
-        } else {
-          totalNew += batch.length
-          console.log(`[Crawl] Inserted batch of ${batch.length} articles`)
-          batch.forEach(item => {
-            if (item.original_url) existingUrls.add(item.original_url)
+        // 5. Filter out duplicates and prepare insert data
+        const newArticles = matchedArticles.filter(a => !existingUrls.has(a.article.url))
+        totalDedupSkipped += matchedArticles.length - newArticles.length
+
+        if (newArticles.length > 0) {
+          const insertData = newArticles.map(a => ({
+            account_id: account.id,
+            title: a.article.title,
+            original_title: a.article.title,
+            original_url: a.article.url,
+            summary: a.article.digest || null,
+            content: a.article.content || null,
+            published_at: a.article.publish_time
+              ? new Date(a.article.publish_time * 1000).toISOString()
+              : (a.article.published_at || new Date().toISOString()),
+            unique_key: a.article.msg_id || null,
+            matched_keywords: a.matchedKw.join(','),
+            clean_status: 'pending',
+          }))
+
+          // Insert articles
+          const { error: insertError } = await client
+            .from('articles')
+            .insert(insertData)
+
+          if (insertError) {
+            console.error(`[Crawl] ${account.name} insert error:`, insertError.message)
+            errors.push(`${account.name} insert: ${insertError.message}`)
+          } else {
+            totalNew += insertData.length
+            console.log(`[Crawl] ${account.name}: inserted ${insertData.length} new articles`)
+          }
+        }
+
+        // 6. Update last_crawled_at for this account
+        await client
+          .from('accounts')
+          .update({ last_crawled_at: new Date().toISOString() })
+          .eq('id', account.id)
+
+        // 7. Update progress in crawl log
+        await client
+          .from('crawl_logs')
+          .update({
+            accounts_crawled: accountsProcessed,
+            articles_found: totalFound,
+            articles_new: totalNew,
+            articles_matched: totalMatched,
           })
-        }
+          .eq('id', logData.id)
+
+      } catch (accountError: any) {
+        // If any error occurs processing this account, log it and continue
+        totalFailed++
+        errors.push(`${account.name}: ${accountError.message}`)
+        console.error(`[Crawl] [${accountsProcessed}/${accounts.length}] ${account.name} ERROR:`, accountError.message)
+        
+        // Still try to update last_crawled_at
+        try {
+          await client
+            .from('accounts')
+            .update({ last_crawled_at: new Date().toISOString() })
+            .eq('id', account.id)
+        } catch {}
       }
     }
 
-    // Update crawl log - use correct field names
+    // Finalize crawl log
     const { error: updateLogError } = await client
       .from('crawl_logs')
       .update({
         status: totalFailed > 0 || errors.length > 0 ? 'partial' : 'success',
         finished_at: new Date().toISOString(),
-        accounts_crawled: accounts.length,
+        accounts_crawled: accountsProcessed,
         articles_found: totalFound,
         articles_new: totalNew,
         articles_matched: totalMatched,
-        message: errors.length > 0 ? errors.join('; ') : null
+        message: errors.length > 0 ? errors.slice(0, 20).join('; ') : null // Limit error messages
       })
       .eq('id', logData.id)
 
     if (updateLogError) throw updateLogError
 
-    // 清理超过4天的历史文章，确保数据库只保留近4天的数据
-    const cutoffDate = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString()
+    // Cleanup old articles (older than 4 days)
+    const cutoffDate = new Date(cutoffTime).toISOString()
     const { error: cleanupError } = await client
       .from('articles')
       .delete()
@@ -234,12 +259,14 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `采集完成: 发现 ${totalFound} 篇, 4天内 ${totalFound - totalSkippedOld} 篇, 命中 ${totalMatched} 篇, 去重跳过 ${totalDedupSkipped} 篇, 新增 ${totalNew} 篇`,
+      message: `采集完成: ${accountsProcessed}个账号, 发现${totalFound}篇, 命中${totalMatched}篇, 去重跳过${totalDedupSkipped}篇, 新增${totalNew}篇, 失败${totalFailed}个`,
       data: {
-        accounts_crawled: accounts.length,
+        accounts_crawled: accountsProcessed,
+        accounts_failed: totalFailed,
         articles_found: totalFound,
         articles_new: totalNew,
         articles_matched: totalMatched,
+        articles_dedup_skipped: totalDedupSkipped,
         errors
       }
     })
