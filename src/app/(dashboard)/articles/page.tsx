@@ -298,18 +298,8 @@ export default function ArticlesPage() {
       const colorMap: Record<string, string> = { '官方': 'blue', '高校': 'green', '竞对': 'orange' }
       return v ? <Tag color={colorMap[v] || 'default'}>{v}</Tag> : '-'
     }},
-    { title: '匹配关键词', dataIndex: 'matched_keywords', key: 'matched_keywords', width: 150, render: (v: string | string[]) => {
-      if (!v) return '-'
-      const keywords = typeof v === 'string' ? v.split(',') : v
-      return keywords.map((k: string) => <Tag color="blue" key={k}>{k}</Tag>)
-    }},
-    { title: '发布时间', dataIndex: 'published_at', key: 'published_at', width: 160, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-' },
+    { title: '发布时间', dataIndex: 'published_at', key: 'published_at', width: 120, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD') : '-' },
     { title: '状态', dataIndex: 'is_read', key: 'is_read', width: 80, render: (v: boolean) => <Tag color={v ? 'default' : 'red'}>{v ? '已读' : '未读'}</Tag> },
-    { title: '清洗状态', dataIndex: 'clean_status', key: 'clean_status', width: 100, render: (v: string) => {
-      const colorMap: Record<string, string> = { pending: 'default', cleaned: 'green', duplicate: 'orange', failed: 'red' }
-      const labelMap: Record<string, string> = { pending: '待清洗', cleaned: '已清洗', duplicate: '重复', failed: '失败' }
-      return v ? <Tag color={colorMap[v] || 'default'}>{labelMap[v] || v}</Tag> : <Tag color="default">待清洗</Tag>
-    }},
   ], [handleMarkRead])
 
   const pagination = useMemo(() => ({
@@ -375,18 +365,6 @@ export default function ArticlesPage() {
           allowClear 
           onChange={v => handleFilterChange('isRead', v || '')}
           options={[{ value: 'true', label: '已读' }, { value: 'false', label: '未读' }]} 
-        />
-        <Select 
-          placeholder="清洗状态" 
-          style={{ width: 130 }} 
-          allowClear 
-          onChange={v => handleFilterChange('cleanStatus', v || '')}
-          options={[
-            { value: 'pending', label: '待清洗' },
-            { value: 'cleaned', label: '已清洗' },
-            { value: 'duplicate', label: '重复' },
-            { value: 'failed', label: '清洗失败' },
-          ]} 
         />
         <Checkbox 
           checked={filters.includeDuplicates} 
