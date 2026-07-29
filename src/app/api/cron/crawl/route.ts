@@ -84,6 +84,8 @@ export async function GET(request: Request) {
       console.log(`[Cron Crawl] Skipped ${skipReason.weeklyLimit} accounts by weekly limit`)
     }
 
+    console.log(`[Cron Crawl] Starting crawl: ${finalAccounts.length} accounts (total active: ${accounts.length}, skipped by limit: ${skipReason.weeklyLimit})`)
+
     if (finalAccounts.length === 0) {
       await client.from('crawl_logs').insert({
         status: 'skipped',
@@ -137,7 +139,13 @@ export async function GET(request: Request) {
     }> = []
 
     // Crawl each account and collect articles
+    let crawledCount = 0
     for (const account of finalAccounts) {
+      crawledCount++
+      if (crawledCount % 20 === 0) {
+        console.log(`[Cron Crawl] Progress: ${crawledCount}/${finalAccounts.length} accounts crawled`)
+      }
+      
       const result = await fetchAccountArticles(apiKey, account.wx_id, articleCount)
 
       if (!result.success) {

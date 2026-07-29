@@ -3,6 +3,9 @@ import { getSupabaseServiceClient } from '@/lib/supabase'
 import { fetchAccountArticles, matchKeywords } from '@/lib/api-client'
 import { requireAuth } from '@/lib/auth'
 
+export const runtime = 'nodejs'
+export const maxDuration = 300 // 5 minutes for large account lists
+
 export async function POST(request: NextRequest) {
   const session = await requireAuth(request)
   if (session instanceof Response) return session
@@ -39,6 +42,8 @@ export async function POST(request: NextRequest) {
     if (!accounts || accounts.length === 0) {
       return NextResponse.json({ success: false, message: '没有可采集的公众号' }, { status: 400 })
     }
+
+    console.log(`[Crawl] Starting crawl for ${accounts.length} active accounts`)
 
     // Get active keywords (optionally filtered by user selection)
     let keywordsQuery = client
@@ -80,7 +85,13 @@ export async function POST(request: NextRequest) {
     }> = []
 
     // Crawl each account and collect articles
+    let crawledCount = 0
     for (const account of accounts) {
+      crawledCount++
+      if (crawledCount % 20 === 0) {
+        console.log(`[Crawl] Progress: ${crawledCount}/${accounts.length} accounts crawled`)
+      }
+      
       const result = await fetchAccountArticles(apiKey, account.wx_id, articleCount)
       
       if (!result.success) {
