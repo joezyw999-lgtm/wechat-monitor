@@ -4,7 +4,150 @@ import { fetchAccountArticles, matchKeywords } from '@/lib/api-client'
 import { requireAuth } from '@/lib/auth'
 
 export const runtime = 'nodejs'
-export const maxDuration = 300 // 5 minutes for large account lists
+export const maxDuration = 300
+
+// 安全时间上限（毫秒）：Vercel 限制 300s，留 40s 余量
+const SAFE_TIME_LIMIT_MS = 260 * 1000
+// 超时日志清理阈值（分钟）
+const STALE_LOG_MINUTES = 10
+
+/**
+ * 清理超时的运行中日志（超过 STALE_LOG_MINUTES 分钟仍为 running）
+ */
+async function cleanupStaleLogs(client: any) {
+  const staleThreshold = new Date(Date.now() - STALE_LOG_MINUTES * 60 * 1000).toISOString()
+  const { data: staleLogs } = await client
+    .from('crawl_logs')
+    .select('id, started_at, cursor_position, total_accounts, accounts_crawled, articles_new')
+    .eq('status', 'running')
+    .lt('started_at', staleThreshold)
+
+  if (staleLogs && staleLogs.length > 0) {
+    for (const log of staleLogs) {
+      const cursor = log.cursor_position || 0
+      const total = log.total_accounts || 0
+      const crawled = log.accounts_crawled || 0
+      await client
+        .from('crawl_logs')
+        .update({
+          status: 'timeout',
+          finished_at: new Date().toISOString(),
+          message: `采集超时自动标记（已处理 ${crawled}/${total} 个账号，游标位置 ${cursor}）`,
+        })
+        .eq('id', log.id)
+    }
+    console.log(`[Crawl] Cleaned up ${staleLogs.length} stale running logs`)
+  }
+}
+
+/**
+ * 查找可恢复的采集任务（status='partial' 且 cursor_position < total_accounts）
+ */
+async function findResumableLog(client: any) {
+  const { data } = await client
+    .from('crawl_logs')
+    .select('*')
+    .eq('status', 'partial')
+    .gt('total_accounts', 0)
+    .order('started_at', { ascending: false })
+    .limit(1)
+
+  if (data && data.length > 0) {
+    const log = data[0]
+    if ((log.cursor_position || 0) < (log.total_accounts || 0)) {
+      return log
+    }
+  }
+  return null
+}
+
+/**
+ * 处理单个公众号：抓取 → 过滤 → 去重 → 入库
+ * 返回 { found, matched, newCount, dedupSkipped, oldSkipped, error? }
+ */
+async function processOneAccount(
+  client: any,
+  account: any,
+  apiKey: string,
+  articleCount: number,
+  keywords: string[],
+  cutoffTime: number,
+) {
+  const result = await fetchAccountArticles(apiKey, account.wx_id, articleCount)
+
+  if (!result.success) {
+    return { found: 0, matched: 0, newCount: 0, dedupSkipped: 0, oldSkipped: 0, error: result.error }
+  }
+
+  const found = result.articles.length
+
+  // 过滤近4天
+  const recentArticles = result.articles.filter((article: any) => {
+    const pubTime = article.published_at || article.publish_time
+    if (!pubTime) return false
+    const timestamp = typeof pubTime === 'number' ? pubTime * 1000 : new Date(pubTime).getTime()
+    return !isNaN(timestamp) && timestamp >= cutoffTime
+  })
+  const oldSkipped = found - recentArticles.length
+
+  // 关键词匹配
+  const matchedArticles: Array<{ article: any; matchedKw: string[] }> = []
+  for (const article of recentArticles) {
+    const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
+    if (matchedKw.length > 0) {
+      matchedArticles.push({ article, matchedKw })
+    }
+  }
+  const matched = matchedArticles.length
+
+  if (matched === 0) {
+    return { found, matched: 0, newCount: 0, dedupSkipped: 0, oldSkipped }
+  }
+
+  // 去重
+  const urls = matchedArticles.map(a => a.article.url).filter(Boolean)
+  const existingUrls = new Set<string>()
+  if (urls.length > 0) {
+    const { data: existing } = await client
+      .from('articles')
+      .select('original_url')
+      .in('original_url', urls)
+    if (existing) {
+      existing.forEach((e: any) => existingUrls.add(e.original_url))
+    }
+  }
+
+  const newArticles = matchedArticles.filter(a => !existingUrls.has(a.article.url))
+  const dedupSkipped = matched - newArticles.length
+
+  // 入库
+  let newCount = 0
+  if (newArticles.length > 0) {
+    const insertData = newArticles.map(a => ({
+      account_id: account.id,
+      title: a.article.title,
+      original_title: a.article.title,
+      original_url: a.article.url,
+      summary: a.article.digest || null,
+      content: a.article.content || null,
+      published_at: a.article.publish_time
+        ? new Date(a.article.publish_time * 1000).toISOString()
+        : (a.article.published_at || new Date().toISOString()),
+      unique_key: a.article.msg_id || null,
+      matched_keywords: a.matchedKw.join(','),
+      clean_status: 'pending',
+    }))
+
+    const { error: insertError } = await client.from('articles').insert(insertData)
+    if (insertError) {
+      console.error(`[Crawl] ${account.name} insert error:`, insertError.message)
+      return { found, matched, newCount: 0, dedupSkipped, oldSkipped, error: insertError.message }
+    }
+    newCount = insertData.length
+  }
+
+  return { found, matched, newCount, dedupSkipped, oldSkipped }
+}
 
 export async function POST(request: NextRequest) {
   const session = await requireAuth(request)
@@ -12,11 +155,15 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const accountId = body.accountId // optional, if not provided, crawl all
+    const accountId = body.accountId
     const keywordFilter: string[] | undefined = body.keywords && Array.isArray(body.keywords) && body.keywords.length > 0 ? body.keywords : undefined
+    const resume = body.resume === true // 是否强制恢复上次任务
     const client = getSupabaseServiceClient() as any
 
-    // Get API key and article count from settings (bypass cache for fresh data)
+    // Step 0: 清理超时日志
+    await cleanupStaleLogs(client)
+
+    // Get API key and article count from settings
     const { data: settingsData, error: settingsError } = await client
       .from('settings')
       .select('key, value')
@@ -31,7 +178,81 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: '请先在系统设置中配置 OneAPI Key' }, { status: 400 })
     }
 
-    // Get accounts to crawl
+    // Step 1: 检查是否有可恢复的任务
+    let resumableLog: any = null
+    if (resume || !accountId) {
+      resumableLog = await findResumableLog(client)
+    }
+
+    // Get keywords
+    let keywordsQuery = client.from('keywords').select('word').eq('status', 'active')
+    if (keywordFilter) {
+      keywordsQuery = keywordsQuery.in('word', keywordFilter)
+    }
+    const { data: keywordsData } = await keywordsQuery
+    const keywords = keywordsData?.map((k: any) => k.word) || []
+
+    const cutoffTime = Date.now() - 4 * 24 * 60 * 60 * 1000
+    const startTime = Date.now()
+
+    // 如果是恢复任务，从上次位置继续
+    if (resumableLog && !accountId) {
+      console.log(`[Crawl] Resuming from log ${resumableLog.id}, cursor=${resumableLog.cursor_position}, total=${resumableLog.total_accounts}`)
+
+      // 获取公众号列表
+      const { data: allAccounts } = await client
+        .from('accounts')
+        .select('*')
+        .eq('status', 'active')
+        .order('created_at', { ascending: true })
+
+      if (!allAccounts || allAccounts.length === 0) {
+        return NextResponse.json({ success: false, message: '没有可采集的公众号' }, { status: 400 })
+      }
+
+      // 从 cursor 位置开始
+      const cursorPos = resumableLog.cursor_position || 0
+      const remainingAccounts = allAccounts.slice(cursorPos)
+
+      if (remainingAccounts.length === 0) {
+        // 已全部完成
+        await client.from('crawl_logs').update({
+          status: 'success',
+          finished_at: new Date().toISOString(),
+          message: '恢复采集：所有公众号已完成',
+        }).eq('id', resumableLog.id)
+
+        return NextResponse.json({
+          success: true,
+          message: '所有公众号已采集完成',
+          data: { resumed: true, log_id: resumableLog.id, remaining: 0 }
+        })
+      }
+
+      // 更新日志状态为 running
+      await client.from('crawl_logs').update({
+        status: 'running',
+        message: `恢复采集，从第 ${cursorPos + 1} 个账号开始（共 ${remainingAccounts.length} 个待处理）`,
+      }).eq('id', resumableLog.id)
+
+      // 执行采集
+      const result = await crawlAccounts(
+        client, remainingAccounts, apiKey, articleCount, keywords, cutoffTime,
+        resumableLog.id, cursorPos, allAccounts.length,
+        resumableLog.articles_found || 0,
+        resumableLog.articles_new || 0,
+        resumableLog.articles_matched || 0,
+        startTime
+      )
+
+      return NextResponse.json({
+        success: true,
+        message: result.message,
+        data: { ...result, resumed: true, log_id: resumableLog.id }
+      })
+    }
+
+    // 全新采集
     let accountsQuery = client.from('accounts').select('*').eq('status', 'active')
     if (accountId) {
       accountsQuery = client.from('accounts').select('*').eq('id', accountId)
@@ -43,238 +264,179 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: '没有可采集的公众号' }, { status: 400 })
     }
 
-    console.log(`[Crawl] Starting crawl for ${accounts.length} active accounts`)
+    console.log(`[Crawl] Starting fresh crawl for ${accounts.length} active accounts`)
 
-    // Get active keywords (optionally filtered by user selection)
-    let keywordsQuery = client
-      .from('keywords')
-      .select('word')
-      .eq('status', 'active')
-    if (keywordFilter) {
-      keywordsQuery = keywordsQuery.in('word', keywordFilter)
-    }
-    const { data: keywordsData, error: kwError } = await keywordsQuery
-    if (kwError) throw kwError
-    const keywords = keywordsData?.map((k: any) => k.word) || []
-
-    // Create crawl log
+    // 创建新日志
     const { data: logData, error: logError } = await client
       .from('crawl_logs')
       .insert({
         status: 'running',
         started_at: new Date().toISOString(),
-        keywords_used: keywordFilter ? keywordFilter.join(',') : null
+        keywords_used: keywordFilter ? keywordFilter.join(',') : null,
+        total_accounts: accounts.length,
+        cursor_position: 0,
+        account_ids: accounts.map((a: any) => a.id).join(','),
       })
       .select()
       .single()
     if (logError) throw logError
 
-    // Counters
-    let totalFound = 0
-    let totalSkippedOld = 0
-    let totalNew = 0
-    let totalMatched = 0
-    let totalDedupSkipped = 0
-    let totalFailed = 0
-    let accountsProcessed = 0
-    const errors: string[] = []
-
-    // 4-day cutoff
-    const now = Date.now()
-    const FOUR_DAYS_MS = 4 * 24 * 60 * 60 * 1000
-    const cutoffTime = now - FOUR_DAYS_MS
-
-    // Process each account individually: fetch -> filter -> dedup -> insert
-    for (const account of accounts) {
-      accountsProcessed++
-      
-      try {
-        // 1. Fetch articles from API
-        const result = await fetchAccountArticles(apiKey, account.wx_id, articleCount)
-        
-        if (!result.success) {
-          totalFailed++
-          errors.push(`${account.name}: ${result.error}`)
-          console.log(`[Crawl] [${accountsProcessed}/${accounts.length}] ${account.name} FAILED: ${result.error}`)
-          // Still update last_crawled_at even on failure
-          await client
-            .from('accounts')
-            .update({ last_crawled_at: new Date().toISOString() })
-            .eq('id', account.id)
-          continue
-        }
-
-        console.log(`[Crawl] [${accountsProcessed}/${accounts.length}] ${account.name}: API returned ${result.articles.length} articles`)
-        totalFound += result.articles.length
-
-        // 2. Filter by publish time - only keep articles from the last 4 days
-        const recentArticles = result.articles.filter((article: any) => {
-          const pubTime = article.published_at || article.publish_time
-          if (!pubTime) return false
-          const timestamp = typeof pubTime === 'number' ? pubTime * 1000 : new Date(pubTime).getTime()
-          return !isNaN(timestamp) && timestamp >= cutoffTime
-        })
-
-        totalSkippedOld += result.articles.length - recentArticles.length
-
-        // 3. Match keywords
-        const matchedArticles: Array<{ article: any; matchedKw: string[] }> = []
-        for (const article of recentArticles) {
-          const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
-          if (matchedKw.length === 0) {
-            continue
-          }
-          matchedArticles.push({ article, matchedKw })
-        }
-
-        totalMatched += matchedArticles.length
-
-        if (matchedArticles.length === 0) {
-          // No matching articles, just update last_crawled_at
-          await client
-            .from('accounts')
-            .update({ last_crawled_at: new Date().toISOString() })
-            .eq('id', account.id)
-          
-          // Update progress in crawl log
-          await client
-            .from('crawl_logs')
-            .update({
-              accounts_crawled: accountsProcessed,
-              articles_found: totalFound,
-              articles_new: totalNew,
-              articles_matched: totalMatched,
-            })
-            .eq('id', logData.id)
-          continue
-        }
-
-        // 4. Dedup by original_url for this account's articles
-        const urls = matchedArticles.map(a => a.article.url).filter(Boolean)
-        const existingUrls = new Set<string>()
-
-        if (urls.length > 0) {
-          const { data: existing } = await client
-            .from('articles')
-            .select('original_url')
-            .in('original_url', urls)
-
-          if (existing) {
-            existing.forEach((e: any) => existingUrls.add(e.original_url))
-          }
-        }
-
-        // 5. Filter out duplicates and prepare insert data
-        const newArticles = matchedArticles.filter(a => !existingUrls.has(a.article.url))
-        totalDedupSkipped += matchedArticles.length - newArticles.length
-
-        if (newArticles.length > 0) {
-          const insertData = newArticles.map(a => ({
-            account_id: account.id,
-            title: a.article.title,
-            original_title: a.article.title,
-            original_url: a.article.url,
-            summary: a.article.digest || null,
-            content: a.article.content || null,
-            published_at: a.article.publish_time
-              ? new Date(a.article.publish_time * 1000).toISOString()
-              : (a.article.published_at || new Date().toISOString()),
-            unique_key: a.article.msg_id || null,
-            matched_keywords: a.matchedKw.join(','),
-            clean_status: 'pending',
-          }))
-
-          // Insert articles
-          const { error: insertError } = await client
-            .from('articles')
-            .insert(insertData)
-
-          if (insertError) {
-            console.error(`[Crawl] ${account.name} insert error:`, insertError.message)
-            errors.push(`${account.name} insert: ${insertError.message}`)
-          } else {
-            totalNew += insertData.length
-            console.log(`[Crawl] ${account.name}: inserted ${insertData.length} new articles`)
-          }
-        }
-
-        // 6. Update last_crawled_at for this account
-        await client
-          .from('accounts')
-          .update({ last_crawled_at: new Date().toISOString() })
-          .eq('id', account.id)
-
-        // 7. Update progress in crawl log
-        await client
-          .from('crawl_logs')
-          .update({
-            accounts_crawled: accountsProcessed,
-            articles_found: totalFound,
-            articles_new: totalNew,
-            articles_matched: totalMatched,
-          })
-          .eq('id', logData.id)
-
-      } catch (accountError: any) {
-        // If any error occurs processing this account, log it and continue
-        totalFailed++
-        errors.push(`${account.name}: ${accountError.message}`)
-        console.error(`[Crawl] [${accountsProcessed}/${accounts.length}] ${account.name} ERROR:`, accountError.message)
-        
-        // Still try to update last_crawled_at
-        try {
-          await client
-            .from('accounts')
-            .update({ last_crawled_at: new Date().toISOString() })
-            .eq('id', account.id)
-        } catch {}
-      }
-    }
-
-    // Finalize crawl log
-    const { error: updateLogError } = await client
-      .from('crawl_logs')
-      .update({
-        status: totalFailed > 0 || errors.length > 0 ? 'partial' : 'success',
-        finished_at: new Date().toISOString(),
-        accounts_crawled: accountsProcessed,
-        articles_found: totalFound,
-        articles_new: totalNew,
-        articles_matched: totalMatched,
-        message: errors.length > 0 ? errors.slice(0, 20).join('; ') : null // Limit error messages
-      })
-      .eq('id', logData.id)
-
-    if (updateLogError) throw updateLogError
-
-    // Cleanup old articles (older than 4 days)
-    const cutoffDate = new Date(cutoffTime).toISOString()
-    const { error: cleanupError } = await client
-      .from('articles')
-      .delete()
-      .lt('published_at', cutoffDate)
-    if (cleanupError) {
-      console.error('[Crawl] Cleanup old articles error:', cleanupError.message)
-    }
+    const result = await crawlAccounts(
+      client, accounts, apiKey, articleCount, keywords, cutoffTime,
+      logData.id, 0, accounts.length,
+      0, 0, 0, startTime
+    )
 
     return NextResponse.json({
       success: true,
-      message: `采集完成: ${accountsProcessed}个账号, 发现${totalFound}篇, 命中${totalMatched}篇, 去重跳过${totalDedupSkipped}篇, 新增${totalNew}篇, 失败${totalFailed}个`,
-      data: {
-        accounts_crawled: accountsProcessed,
-        accounts_failed: totalFailed,
-        articles_found: totalFound,
-        articles_new: totalNew,
-        articles_matched: totalMatched,
-        articles_dedup_skipped: totalDedupSkipped,
-        errors
-      }
+      message: result.message,
+      data: { ...result, resumed: false, log_id: logData.id }
     })
   } catch (error: any) {
     console.error('Crawl error:', error)
-    return NextResponse.json({ 
-      success: false, 
-      message: error.message || '采集失败' 
+    return NextResponse.json({
+      success: false,
+      message: error.message || '采集失败'
     }, { status: 500 })
+  }
+}
+
+/**
+ * 核心采集逻辑：逐个处理公众号，带时间感知
+ */
+async function crawlAccounts(
+  client: any,
+  accounts: any[],
+  apiKey: string,
+  articleCount: number,
+  keywords: string[],
+  cutoffTime: number,
+  logId: string,
+  startCursor: number,
+  totalAccounts: number,
+  initFound: number,
+  initNew: number,
+  initMatched: number,
+  startTime: number,
+) {
+  let totalFound = initFound
+  let totalNew = initNew
+  let totalMatched = initMatched
+  let totalFailed = 0
+  let accountsProcessed = 0
+  const errors: string[] = []
+  let cursor = startCursor
+  let timedOut = false
+
+  for (const account of accounts) {
+    // 时间感知：检查是否接近超时
+    const elapsed = Date.now() - startTime
+    if (elapsed >= SAFE_TIME_LIMIT_MS) {
+      console.log(`[Crawl] Approaching time limit (${Math.round(elapsed / 1000)}s), stopping at cursor=${cursor}`)
+      timedOut = true
+      break
+    }
+
+    accountsProcessed++
+    cursor++
+
+    try {
+      const { found, matched, newCount, dedupSkipped, oldSkipped, error } =
+        await processOneAccount(client, account, apiKey, articleCount, keywords, cutoffTime)
+
+      totalFound += found
+      totalMatched += matched
+      totalNew += newCount
+      if (error) {
+        totalFailed++
+        errors.push(`${account.name}: ${error}`)
+      }
+
+      // 更新 last_crawled_at
+      await client
+        .from('accounts')
+        .update({ last_crawled_at: new Date().toISOString() })
+        .eq('id', account.id)
+
+      // 实时更新日志进度
+      await client
+        .from('crawl_logs')
+        .update({
+          cursor_position: cursor,
+          accounts_crawled: startCursor + accountsProcessed,
+          articles_found: totalFound,
+          articles_new: totalNew,
+          articles_matched: totalMatched,
+        })
+        .eq('id', logId)
+
+      if (accountsProcessed % 10 === 0) {
+        console.log(`[Crawl] Progress: ${cursor}/${totalAccounts} accounts, ${totalNew} new articles, ${Math.round(elapsed / 1000)}s elapsed`)
+      }
+    } catch (accountError: any) {
+      totalFailed++
+      errors.push(`${account.name}: ${accountError.message}`)
+      console.error(`[Crawl] [${cursor}/${totalAccounts}] ${account.name} ERROR:`, accountError.message)
+
+      try {
+        await client.from('accounts')
+          .update({ last_crawled_at: new Date().toISOString() })
+          .eq('id', account.id)
+      } catch {}
+    }
+  }
+
+  // 确定最终状态
+  const allDone = !timedOut && cursor >= totalAccounts
+  const finalStatus = allDone
+    ? (totalFailed > 0 ? 'partial' : 'success')
+    : 'partial'
+
+  const finalMessage = timedOut
+    ? `采集时间接近上限，已暂停（已处理 ${cursor}/${totalAccounts}，可继续采集）`
+    : errors.length > 0
+      ? errors.slice(0, 20).join('; ')
+      : null
+
+  // 更新最终日志
+  await client
+    .from('crawl_logs')
+    .update({
+      status: finalStatus,
+      finished_at: allDone ? new Date().toISOString() : null, // 未完成不设置 finished_at
+      cursor_position: cursor,
+      total_accounts: totalAccounts,
+      accounts_crawled: startCursor + accountsProcessed,
+      articles_found: totalFound,
+      articles_new: totalNew,
+      articles_matched: totalMatched,
+      message: finalMessage,
+    })
+    .eq('id', logId)
+
+  // 清理超过4天的历史文章（仅在所有账号处理完时执行）
+  if (allDone) {
+    const cutoffDate = new Date(cutoffTime).toISOString()
+    await client.from('articles').delete().lt('published_at', cutoffDate)
+  }
+
+  const elapsed = Date.now() - startTime
+  const message = timedOut
+    ? `采集暂停: 已处理 ${cursor}/${totalAccounts} 个账号, 新增 ${totalNew} 篇, 耗时 ${Math.round(elapsed / 1000)}s, 可继续采集`
+    : `采集完成: ${startCursor + accountsProcessed}个账号, 发现${totalFound}篇, 新增${totalNew}篇, 失败${totalFailed}个, 耗时${Math.round(elapsed / 1000)}s`
+
+  return {
+    message,
+    accounts_crawled: startCursor + accountsProcessed,
+    accounts_failed: totalFailed,
+    articles_found: totalFound,
+    articles_new: totalNew,
+    articles_matched: totalMatched,
+    cursor_position: cursor,
+    total_accounts: totalAccounts,
+    timed_out: timedOut,
+    all_done: allDone,
+    elapsed_seconds: Math.round(elapsed / 1000),
+    errors,
   }
 }

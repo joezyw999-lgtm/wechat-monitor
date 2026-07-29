@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await client
       .from('crawl_logs')
-      .select('id,status,started_at,finished_at,accounts_crawled,articles_found,articles_matched,articles_new,message')
+      .select('id,status,started_at,finished_at,accounts_crawled,articles_found,articles_matched,articles_new,message,cursor_position,total_accounts')
       .order('started_at', { ascending: false })
       .range(from, to)
 
