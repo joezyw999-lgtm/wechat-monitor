@@ -196,6 +196,53 @@ async function processOneAccount(
   return { found, matched, newCount, dedupSkipped, oldSkipped }
 }
 
+/**
+ * 检查是否有正在运行的采集任务
+ */
+async function hasRunningCrawl(client: any): Promise<boolean> {
+  const { data } = await client
+    .from('crawl_logs')
+    .select('id')
+    .eq('status', 'running')
+    .limit(1)
+  
+  return data && data.length > 0
+}
+
+export async function GET(request: NextRequest) {
+  const session = await requireAuth(request)
+  if (session instanceof Response) return session
+
+  const client = getSupabaseServiceClient() as any
+  
+  // 获取最新的采集日志
+  const { data: logs } = await client
+    .from('crawl_logs')
+    .select('*')
+    .order('started_at', { ascending: false })
+    .limit(5)
+
+  if (!logs || logs.length === 0) {
+    return NextResponse.json({ success: true, data: { logs: [], current: null, has_running: false } })
+  }
+
+  const current = logs[0]
+  const hasMore = 
+    current.status === 'partial' && 
+    current.total_accounts > 0 && 
+    (current.cursor_position || 0) < (current.total_accounts || 0)
+
+  return NextResponse.json({
+    success: true,
+    data: {
+      logs,
+      current,
+      has_running: current.status === 'running',
+      has_more: hasMore,
+    }
+  })
+}
+
 export async function POST(request: NextRequest) {
   const session = await requireAuth(request)
   if (session instanceof Response) return session
@@ -209,6 +256,30 @@ export async function POST(request: NextRequest) {
 
     // Step 0: 清理超时日志
     await cleanupStaleLogs(client)
+
+    // Step 0.5: 任务锁 - 批量采集时检查是否已有运行中的任务
+    if (!accountId) {
+      const running = await hasRunningCrawl(client)
+      if (running) {
+        // 如果有正在运行的任务，返回冲突提示，但带上当前进度
+        const { data: currentLog } = await client
+          .from('crawl_logs')
+          .select('*')
+          .eq('status', 'running')
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .single()
+        
+        return NextResponse.json({
+          success: false,
+          message: '已有采集任务正在运行中，请等待当前任务完成',
+          data: { 
+            concurrent: true,
+            current: currentLog,
+          }
+        }, { status: 409 })
+      }
+    }
 
     // Get API key and article count from settings
     const { data: settingsData, error: settingsError } = await client
@@ -295,7 +366,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         message: result.message,
-        data: { ...result, resumed: true, log_id: resumableLog.id }
+        data: { 
+          ...result, 
+          resumed: true, 
+          log_id: resumableLog.id,
+          has_more: !result.all_done,
+        }
       })
     }
 
@@ -337,7 +413,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: result.message,
-      data: { ...result, resumed: false, log_id: logData.id }
+      data: { 
+        ...result, 
+        resumed: false, 
+        log_id: logData.id,
+        has_more: !result.all_done,
+      }
     })
   } catch (error: any) {
     console.error('Crawl error:', error)
