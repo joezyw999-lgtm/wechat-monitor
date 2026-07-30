@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase'
 import { fetchAccountArticles, matchKeywords } from '@/lib/api-client'
 import { requireAuth } from '@/lib/auth'
+import { normalizeTitleForDedup, dedupArticlesByTitle } from '@/lib/title-normalize'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -104,7 +105,7 @@ async function processOneAccount(
     return { found, matched: 0, newCount: 0, dedupSkipped: 0, oldSkipped }
   }
 
-  // 去重
+  // URL去重
   const urls = matchedArticles.map(a => a.article.url).filter(Boolean)
   const existingUrls = new Set<string>()
   if (urls.length > 0) {
@@ -117,8 +118,53 @@ async function processOneAccount(
     }
   }
 
-  const newArticles = matchedArticles.filter(a => !existingUrls.has(a.article.url))
-  const dedupSkipped = matched - newArticles.length
+  let filteredByUrl = matchedArticles.filter(a => !existingUrls.has(a.article.url))
+  const urlDedupSkipped = matched - filteredByUrl.length
+
+  // 标题完全一致去重（第一层：同批次内去重）
+  const titleDedupResult = dedupArticlesByTitle(
+    filteredByUrl.map(a => ({
+      title: a.article.title,
+      published_at: a.article.publish_time
+        ? new Date(a.article.publish_time * 1000).toISOString()
+        : a.article.published_at,
+      original: a,
+    })),
+  )
+  const dedupedWithinBatch = titleDedupResult.map(a => (a as any).original)
+  const titleDedupBatchSkipped = filteredByUrl.length - dedupedWithinBatch.length
+
+  // 标题完全一致去重（第二层：与数据库已有标题去重）
+  const titles = dedupedWithinBatch
+    .map(a => normalizeTitleForDedup(a.article.title))
+    .filter(Boolean)
+  let titleDedupDbSkipped = 0
+  let newArticles: typeof matchedArticles = dedupedWithinBatch
+
+  if (titles.length > 0) {
+    const { data: existingTitles } = await client
+      .from('articles')
+      .select('title, normalized_title')
+      .in('normalized_title', titles)
+    
+    const existingNormalizedTitles = new Set<string>()
+    if (existingTitles) {
+      existingTitles.forEach((e: any) => {
+        if (e.normalized_title) {
+          existingNormalizedTitles.add(e.normalized_title)
+        }
+      })
+    }
+
+    newArticles = dedupedWithinBatch.filter(a => {
+      const normalized = normalizeTitleForDedup(a.article.title)
+      if (!normalized) return true
+      return !existingNormalizedTitles.has(normalized)
+    })
+    titleDedupDbSkipped = dedupedWithinBatch.length - newArticles.length
+  }
+
+  const dedupSkipped = urlDedupSkipped + titleDedupBatchSkipped + titleDedupDbSkipped
 
   // 入库
   let newCount = 0
@@ -127,6 +173,7 @@ async function processOneAccount(
       account_id: account.id,
       title: a.article.title,
       original_title: a.article.title,
+      normalized_title: normalizeTitleForDedup(a.article.title),
       original_url: a.article.url,
       summary: a.article.digest || null,
       content: a.article.content || null,
