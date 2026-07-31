@@ -91,7 +91,7 @@ export default function DashboardPage() {
             // 续跑成功，继续轮询
             pollTimerRef.current = setTimeout(poll, 4000)
             return
-          } else if (data.status === 409) {
+          } else if (res.status === 409) {
             // 冲突，已有任务在运行，继续轮询
             pollTimerRef.current = setTimeout(poll, 4000)
             return
