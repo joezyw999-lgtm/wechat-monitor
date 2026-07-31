@@ -72,12 +72,13 @@ async function processOneAccount(
   apiKey: string,
   articleCount: number,
   keywords: string[],
+  blockKeywords: string[],
   cutoffTime: number,
 ) {
   const result = await fetchAccountArticles(apiKey, account.wx_id, articleCount)
 
   if (!result.success) {
-    return { found: 0, matched: 0, newCount: 0, dedupSkipped: 0, oldSkipped: 0, error: result.error }
+    return { found: 0, matched: 0, newCount: 0, dedupSkipped: 0, oldSkipped: 0, blockSkipped: 0, error: result.error }
   }
 
   const found = result.articles.length
@@ -91,9 +92,23 @@ async function processOneAccount(
   })
   const oldSkipped = found - recentArticles.length
 
+  // 屏蔽关键词过滤
+  let blockSkipped = 0
+  const unblockedArticles = blockKeywords.length > 0
+    ? recentArticles.filter((article: any) => {
+        const title = article.title || ''
+        const digest = article.digest || ''
+        const blocked = blockKeywords.some(kw => 
+          kw && (title.includes(kw) || digest.includes(kw))
+        )
+        if (blocked) blockSkipped++
+        return !blocked
+      })
+    : recentArticles
+
   // 关键词匹配
   const matchedArticles: Array<{ article: any; matchedKw: string[] }> = []
-  for (const article of recentArticles) {
+  for (const article of unblockedArticles) {
     const matchedKw = matchKeywords(article.title, article.digest || '', keywords)
     if (matchedKw.length > 0) {
       matchedArticles.push({ article, matchedKw })
@@ -188,12 +203,12 @@ async function processOneAccount(
     const { error: insertError } = await client.from('articles').insert(insertData)
     if (insertError) {
       console.error(`[Crawl] ${account.name} insert error:`, insertError.message)
-      return { found, matched, newCount: 0, dedupSkipped, oldSkipped, error: insertError.message }
+      return { found, matched, newCount: 0, dedupSkipped, oldSkipped, blockSkipped, error: insertError.message }
     }
     newCount = insertData.length
   }
 
-  return { found, matched, newCount, dedupSkipped, oldSkipped }
+  return { found, matched, newCount, dedupSkipped, oldSkipped, blockSkipped }
 }
 
 /**
@@ -302,13 +317,21 @@ export async function POST(request: NextRequest) {
       resumableLog = await findResumableLog(client)
     }
 
-    // Get keywords
-    let keywordsQuery = client.from('keywords').select('word').eq('status', 'active')
+    // Get include keywords
+    let keywordsQuery = client.from('keywords').select('word').eq('status', 'active').eq('type', 'include')
     if (keywordFilter) {
       keywordsQuery = keywordsQuery.in('word', keywordFilter)
     }
     const { data: keywordsData } = await keywordsQuery
     const keywords = keywordsData?.map((k: any) => k.word) || []
+
+    // Get block keywords
+    const { data: blockKeywordsData } = await client
+      .from('keywords')
+      .select('word')
+      .eq('status', 'active')
+      .eq('type', 'exclude')
+    const blockKeywords = blockKeywordsData?.map((k: any) => k.word) || []
 
     const cutoffTime = Date.now() - 4 * 24 * 60 * 60 * 1000
     const startTime = Date.now()
@@ -355,7 +378,7 @@ export async function POST(request: NextRequest) {
 
       // 执行采集
       const result = await crawlAccounts(
-        client, remainingAccounts, apiKey, articleCount, keywords, cutoffTime,
+        client, remainingAccounts, apiKey, articleCount, keywords, blockKeywords, cutoffTime,
         resumableLog.id, cursorPos, allAccounts.length,
         resumableLog.articles_found || 0,
         resumableLog.articles_new || 0,
@@ -405,7 +428,7 @@ export async function POST(request: NextRequest) {
     if (logError) throw logError
 
     const result = await crawlAccounts(
-      client, accounts, apiKey, articleCount, keywords, cutoffTime,
+      client, accounts, apiKey, articleCount, keywords, blockKeywords, cutoffTime,
       logData.id, 0, accounts.length,
       0, 0, 0, startTime
     )
@@ -438,6 +461,7 @@ async function crawlAccounts(
   apiKey: string,
   articleCount: number,
   keywords: string[],
+  blockKeywords: string[],
   cutoffTime: number,
   logId: string,
   startCursor: number,
@@ -470,7 +494,7 @@ async function crawlAccounts(
 
     try {
       const { found, matched, newCount, dedupSkipped, oldSkipped, error } =
-        await processOneAccount(client, account, apiKey, articleCount, keywords, cutoffTime)
+        await processOneAccount(client, account, apiKey, articleCount, keywords, blockKeywords, cutoffTime)
 
       totalFound += found
       totalMatched += matched

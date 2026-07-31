@@ -7,10 +7,16 @@ export async function GET(request: NextRequest) {
   if (session instanceof Response) return session
 
   try {
+    const { searchParams } = new URL(request.url)
+    const type = searchParams.get('type')
     const client = getSupabaseServiceClient()
-    const { data, error } = await client
+    let query = client
       .from('keywords')
       .select('*')
+    if (type) {
+      query = query.eq('type', type)
+    }
+    const { data, error } = await query
       .order('created_at', { ascending: false })
     if (error) throw error
     return NextResponse.json({ success: true, data: data || [] })
@@ -31,6 +37,7 @@ export async function POST(request: NextRequest) {
       .insert({
         word: body.word || body.keyword,
         group_name: body.groupName || body.group_name || null,
+        type: body.type || 'include',
         status: body.status || 'active'
       })
       .select()

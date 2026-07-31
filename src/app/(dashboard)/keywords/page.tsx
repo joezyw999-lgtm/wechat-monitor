@@ -1,113 +1,291 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Tag } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import dayjs from 'dayjs'
-import { useCache } from '@/lib/cache'
+import React, { useState, useCallback, useMemo } from 'react'
+import { Card, Button, Table, Modal, Form, Input, Select, Switch, message, Space, Tag, Tabs } from 'antd'
+import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
+import { useCachedFetch } from '@/lib/cache'
 
-export default function KeywordsPage() {
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editingRecord, setEditingRecord] = useState<any>(null)
+interface Keyword {
+  id: number
+  word: string
+  group_name: string | null
+  type: 'include' | 'exclude'
+  status: 'active' | 'inactive'
+  created_at: string
+}
+
+const KeywordModal = ({ 
+  open, 
+  initialData, 
+  keywordType,
+  onCancel, 
+  onSubmit 
+}: { 
+  open: boolean
+  initialData: Keyword | null
+  keywordType: 'include' | 'exclude'
+  onCancel: () => void
+  onSubmit: (values: any) => Promise<void>
+}) => {
   const [form] = Form.useForm()
-  const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-  const cache = useCache()
 
-  const fetchData = useCallback(async () => {
-    const cached = cache.get('keywords-list')
-    if (cached) {
-      setData(cached)
-      return
-    }
-    setLoading(true)
-    try {
-      const res = await fetch('/api/keywords')
-      const result = await res.json()
-      if (result.success) {
-        setData(result.data)
-        cache.set('keywords-list', result.data)
+  React.useEffect(() => {
+    if (open) {
+      if (initialData) {
+        form.setFieldsValue({
+          word: initialData.word,
+          groupName: initialData.group_name,
+          status: initialData.status === 'active'
+        })
+      } else {
+        form.resetFields()
+        form.setFieldsValue({ status: true })
       }
-    } catch (error) { console.error(error) }
-    finally { setLoading(false) }
-  }, [cache])
+    }
+  }, [open, initialData, form])
 
-  useEffect(() => { fetchData() }, [fetchData])
-
-  const handleSave = useCallback(async () => {
+  const handleSubmit = async () => {
     try {
       const values = await form.validateFields()
-      const isEdit = !!editingRecord
-      const res = await fetch('/api/keywords', {
-        method: isEdit ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...values, id: editingRecord?.id })
+      setLoading(true)
+      await onSubmit({
+        word: values.word,
+        groupName: values.groupName || null,
+        type: keywordType,
+        status: values.status ? 'active' : 'inactive'
       })
-      const result = await res.json()
-      if (result.success) {
-        message.success(isEdit ? '更新成功' : '创建成功')
-        setModalOpen(false)
-        form.resetFields()
-        setEditingRecord(null)
-        fetchData()
-        cache.invalidate('dashboard-stats')
-      } else {
-        message.error(result.message)
-      }
-    } catch (error) { console.error(error) }
-  }, [editingRecord, form, fetchData, cache])
+      setLoading(false)
+    } catch (e: any) {
+      setLoading(false)
+      if (e.errorFields) return
+      message.error(e.message || '保存失败')
+    }
+  }
 
-  const handleDelete = useCallback(async (id: string) => {
-    try {
-      const res = await fetch(`/api/keywords?id=${id}`, { method: 'DELETE' })
-      const result = await res.json()
-      if (result.success) { 
-        message.success('删除成功')
-        fetchData()
-        cache.invalidate('dashboard-stats')
-      } else {
-        message.error(result.message)
-      }
-    } catch (error) { console.error(error) }
-  }, [fetchData, cache])
+  return (
+    <Modal
+      title={initialData ? '编辑关键词' : '新增关键词'}
+      open={open}
+      onCancel={onCancel}
+      onOk={handleSubmit}
+      confirmLoading={loading}
+      destroyOnClose
+    >
+      <Form form={form} layout="vertical">
+        <Form.Item
+          name="word"
+          label="关键词"
+          rules={[{ required: true, message: '请输入关键词' }]}
+        >
+          <Input placeholder="请输入关键词" />
+        </Form.Item>
+        <Form.Item name="groupName" label="分组名称">
+          <Input placeholder="可选：按分组管理关键词" />
+        </Form.Item>
+        <Form.Item name="status" label="状态" valuePropName="checked">
+          <Switch checkedChildren="启用" unCheckedChildren="停用" />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
 
-  const columns = [
-    { title: '关键词', dataIndex: 'word', key: 'word', width: 150 },
-    { title: '分组', dataIndex: 'group_name', key: 'group_name', width: 120, render: (v: string) => v || '-' },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 80, render: (v: string) => <Tag color={v === 'active' ? 'green' : 'default'}>{v === 'active' ? '启用' : '停用'}</Tag> },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 160, render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm') },
+export default function KeywordsPage() {
+  const [activeTab, setActiveTab] = useState<'include' | 'exclude'>('include')
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editingKeyword, setEditingKeyword] = useState<Keyword | null>(null)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+
+  const fetchKeywords = useCallback(async () => {
+    const res = await fetch(`/api/keywords?type=${activeTab}&page=${page}&pageSize=${pageSize}`)
+    const d = await res.json()
+    return d.data || { list: [], total: 0 }
+  }, [activeTab, page, pageSize])
+
+  const { data, loading, refresh } = useCachedFetch(`keywords-${activeTab}-${page}-${pageSize}`, fetchKeywords)
+
+  const columns = useMemo(() => [
     {
-      title: '操作', key: 'action', width: 150,
-      render: (_: any, record: any) => (
-        <Space>
-          <Button size="small" onClick={() => { setEditingRecord(record); form.setFieldsValue({ ...record }); setModalOpen(true) }}>编辑</Button>
-          <Popconfirm title="确定删除?" onConfirm={() => handleDelete(record.id)}><Button size="small" danger>删除</Button></Popconfirm>
+      title: 'ID',
+      dataIndex: 'id',
+      width: 70
+    },
+    {
+      title: '关键词',
+      dataIndex: 'word',
+      width: 200
+    },
+    {
+      title: '分组',
+      dataIndex: 'group_name',
+      width: 140,
+      render: (v: string | null) => v ? <Tag>{v}</Tag> : '-'
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (v: string) => (
+        <Tag color={v === 'active' ? 'green' : 'default'}>
+          {v === 'active' ? '启用' : '停用'}
+        </Tag>
+      )
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      width: 180,
+      render: (v: string) => v ? new Date(v).toLocaleString('zh-CN') : '-'
+    },
+    {
+      title: '操作',
+      width: 160,
+      render: (_: any, record: Keyword) => (
+        <Space size="small">
+          <Button 
+            type="link" 
+            size="small" 
+            icon={<EditOutlined />}
+            onClick={() => {
+              setEditingKeyword(record)
+              setModalOpen(true)
+            }}
+          >
+            编辑
+          </Button>
+          <Button 
+            type="link" 
+            size="small" 
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => handleDelete(record.id)}
+          >
+            删除
+          </Button>
         </Space>
       )
+    }
+  ], [])
+
+  const handleDelete = useCallback(async (id: number) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: '删除后无法恢复，确认删除该关键词吗？',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          const res = await fetch(`/api/keywords?id=${id}`, { method: 'DELETE' })
+          const data = await res.json()
+          if (data.success) {
+            message.success('删除成功')
+            refresh()
+          } else {
+            message.error(data.error || '删除失败')
+          }
+        } catch (e: any) {
+          message.error(e.message || '删除失败')
+        }
+      }
+    })
+  }, [refresh])
+
+  const handleSubmit = useCallback(async (values: any) => {
+    try {
+      const url = editingKeyword 
+        ? `/api/keywords?id=${editingKeyword.id}` 
+        : '/api/keywords'
+      const method = editingKeyword ? 'PUT' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values)
+      })
+      const data = await res.json()
+      if (data.success) {
+        message.success('保存成功')
+        setModalOpen(false)
+        setEditingKeyword(null)
+        refresh()
+      } else {
+        throw new Error(data.error || '保存失败')
+      }
+    } catch (e: any) {
+      message.error(e.message || '保存失败')
+    }
+  }, [editingKeyword, refresh])
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key as 'include' | 'exclude')
+    setPage(1)
+  }
+
+  const tabItems = [
+    {
+      key: 'include',
+      label: '监控关键词',
+    },
+    {
+      key: 'exclude',
+      label: '屏蔽关键词',
     }
   ]
 
   return (
-    <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingRecord(null); form.resetFields(); setModalOpen(true) }}>新增关键词</Button>
-        <Button icon={<ReloadOutlined />} onClick={() => { cache.invalidate('keywords-list'); fetchData() }}>刷新</Button>
-      </div>
-      <Table columns={columns} dataSource={data} rowKey="id" loading={loading} size="middle" />
+    <div className="p-6">
+      <Card
+        title={
+          <Tabs 
+            activeKey={activeTab} 
+            onChange={handleTabChange}
+            items={tabItems}
+            size="small"
+            style={{ marginBottom: -16 }}
+          />
+        }
+        extra={
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setEditingKeyword(null)
+              setModalOpen(true)
+            }}
+          >
+            新增{activeTab === 'include' ? '监控' : '屏蔽'}关键词
+          </Button>
+        }
+      >
+        <Table
+          rowKey="id"
+          columns={columns}
+          dataSource={data?.list || []}
+          loading={loading}
+          pagination={{
+            current: page,
+            pageSize,
+            total: data?.total || 0,
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 条`,
+            onChange: (p, ps) => {
+              setPage(p)
+              setPageSize(ps)
+            }
+          }}
+        />
+      </Card>
 
-      <Modal title={editingRecord ? '编辑关键词' : '新增关键词'} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={handleSave} destroyOnClose>
-        <Form form={form} layout="vertical">
-          <Form.Item name="word" label="关键词" rules={[{ required: true, message: '请输入关键词' }]}>
-            <Input placeholder="如: AI、大模型、出海" />
-          </Form.Item>
-          <Form.Item name="group_name" label="分组">
-            <Input placeholder="可选，如: 技术、商业" />
-          </Form.Item>
-          <Form.Item name="status" label="状态" initialValue="active">
-            <Select options={[{ value: 'active', label: '启用' }, { value: 'inactive', label: '停用' }]} />
-          </Form.Item>
-        </Form>
-      </Modal>
+      <KeywordModal
+        open={modalOpen}
+        initialData={editingKeyword}
+        keywordType={activeTab}
+        onCancel={() => {
+          setModalOpen(false)
+          setEditingKeyword(null)
+        }}
+        onSubmit={handleSubmit}
+      />
     </div>
   )
 }
