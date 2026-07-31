@@ -9,17 +9,28 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const type = searchParams.get('type')
+    const page = parseInt(searchParams.get('page') || '1', 10)
+    const pageSize = parseInt(searchParams.get('pageSize') || '100', 10)
     const client = getSupabaseServiceClient()
     let query = client
       .from('keywords')
-      .select('*')
+      .select('*', { count: 'exact' })
     if (type) {
-      query = query.eq('type', type)
+      // 包含关键词：type = 'include' 或 type IS NULL（兼容历史数据）
+      if (type === 'include') {
+        query = query.or('type.eq.include,type.is.null')
+      } else {
+        query = query.eq('type', type)
+      }
     }
-    const { data, error } = await query
+    const { data, error, count } = await query
       .order('created_at', { ascending: false })
+      .range((page - 1) * pageSize, page * pageSize - 1)
     if (error) throw error
-    return NextResponse.json({ success: true, data: data || [] })
+    return NextResponse.json({
+      success: true,
+      data: { list: data || [], total: count || 0, page, pageSize }
+    })
   } catch (error: any) {
     return NextResponse.json({ success: false, message: error.message }, { status: 500 })
   }

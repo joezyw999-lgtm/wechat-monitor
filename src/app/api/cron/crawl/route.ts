@@ -275,12 +275,12 @@ export async function GET(request: Request) {
       console.log(`[Cron Crawl] Skipped ${skipReason.weeklyLimit} accounts by weekly limit`)
     }
 
-    // Get active include keywords (关键词匹配)
+    // Get active include keywords（type=include 或 type IS NULL，兼容历史数据）
     const { data: keywordsData } = await client
       .from('keywords')
       .select('word')
       .eq('status', 'active')
-      .eq('type', 'include')
+      .or('type.eq.include,type.is.null')
     const keywords = keywordsData?.map((k: any) => k.word) || []
 
     // Get active exclude keywords (屏蔽词过滤)

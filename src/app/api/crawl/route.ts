@@ -317,8 +317,12 @@ export async function POST(request: NextRequest) {
       resumableLog = await findResumableLog(client)
     }
 
-    // Get include keywords
-    let keywordsQuery = client.from('keywords').select('word').eq('status', 'active').eq('type', 'include')
+    // Get include keywords（type=include 或 type IS NULL，兼容历史数据）
+    let keywordsQuery = client
+      .from('keywords')
+      .select('word')
+      .eq('status', 'active')
+      .or('type.eq.include,type.is.null')
     if (keywordFilter) {
       keywordsQuery = keywordsQuery.in('word', keywordFilter)
     }
